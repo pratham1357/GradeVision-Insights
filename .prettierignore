@@ -2,5 +2,7 @@
 **/build/**
 **/coverage/**
 **/node_modules/**
+**/generated/**
+database/prisma/migrations/**
 pnpm-lock.yaml
 *.tsbuildinfo

@@ -8,6 +8,25 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: gradevision
+          POSTGRES_PASSWORD: gradevision_dev_pw
+          POSTGRES_DB: gradevision
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gradevision"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://gradevision:gradevision_dev_pw@localhost:5432/gradevision?schema=public
+
     steps:
       - uses: actions/checkout@v4
 
@@ -21,11 +40,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm --filter @gradevision/shared build
+      - run: pnpm --filter @gradevision/database generate
 
       - run: pnpm typecheck
-
       - run: pnpm lint
-
       - run: pnpm format:check
-
       - run: pnpm build
+
+      - name: Apply migrations
+        run: pnpm --filter @gradevision/database exec prisma migrate deploy
+
+      - name: Seed database
+        run: pnpm --filter @gradevision/database exec tsx prisma/seed.ts

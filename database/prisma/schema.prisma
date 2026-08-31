@@ -1,0 +1,612 @@
+// GradeVision Insights - initial PostgreSQL domain model.
+//
+// Scope of this schema: persistent academic, assessment, submission, evaluation,
+// integrity, hint, and audit data. Live exam state (timers, editor buffers,
+// presence, rate limiting) is intentionally NOT modelled here - it belongs in
+// Redis / the live-session layer added later.
+//
+// Deferred on purpose: authentication, Judge0 wiring, AST/semantic analysis,
+// proctoring enforcement, and LLM hint generation. This file only models data.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums (stable, finite states only)
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  STUDENT
+  INSTRUCTOR
+  ADMIN
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  DROPPED
+  COMPLETED
+}
+
+enum AssessmentStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  CLOSED
+  ARCHIVED
+}
+
+enum QuestionDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+// Kept deliberately small; new languages are an additive enum migration.
+enum ProgrammingLanguage {
+  C
+  CPP
+  JAVA
+  PYTHON
+  JAVASCRIPT
+}
+
+enum TestCaseVisibility {
+  VISIBLE
+  HIDDEN
+}
+
+// Orthogonal to visibility so edge-case taxonomy can grow without reshaping the model.
+enum TestCaseCategory {
+  STANDARD
+  SAMPLE
+  EDGE
+  PERFORMANCE
+  STRESS
+}
+
+enum RubricCriterionType {
+  FUNCTIONAL_CORRECTNESS
+  SEMANTIC_CORRECTNESS
+  ALGORITHMIC_APPROACH
+  PERFORMANCE
+  CODE_QUALITY
+  OTHER
+}
+
+enum ExamSessionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  EXPIRED
+  TERMINATED
+}
+
+enum SubmissionStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum EvaluationRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum TestCaseResultStatus {
+  PASSED
+  FAILED
+  ERROR
+  TIMEOUT
+  SKIPPED
+}
+
+enum ViolationType {
+  TAB_SWITCH
+  WINDOW_BLUR
+  FULLSCREEN_EXIT
+  VISIBILITY_CHANGE
+  OTHER
+}
+
+enum ViolationSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum HintDeliveryType {
+  STATIC
+  INTERACTIVE
+}
+
+enum HintUsageStatus {
+  REQUESTED
+  UNLOCKED
+  CONSUMED
+}
+
+// ---------------------------------------------------------------------------
+// A. Users & academic organization
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  email        String   @unique
+  name         String
+  // Placeholder for future authentication. Never store plaintext passwords.
+  passwordHash String?
+  role         UserRole @default(STUDENT)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  instructingSections Section[]     @relation("SectionInstructor")
+  enrollments         Enrollment[]
+  createdAssessments  Assessment[]  @relation("AssessmentCreatedBy")
+  createdQuestions    Question[]    @relation("QuestionCreatedBy")
+  examSessions        ExamSession[]
+  hintUsages          HintUsage[]
+  resolvedViolations  Violation[]   @relation("ViolationResolvedBy")
+  auditEvents         AuditEvent[]  @relation("AuditActor")
+
+  @@index([role])
+  @@map("users")
+}
+
+model Course {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  code        String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sections    Section[]
+  assessments Assessment[]
+
+  @@map("courses")
+}
+
+model Section {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  courseId     String   @db.Uuid
+  course       Course   @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  name         String
+  // Academic metadata for future expansion (scheduling, catalogs, rosters).
+  term         String?
+  year         Int?
+  instructorId String?  @db.Uuid
+  instructor   User?    @relation("SectionInstructor", fields: [instructorId], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  enrollments Enrollment[]
+  assessments Assessment[]
+
+  @@unique([courseId, name])
+  @@index([courseId])
+  @@index([instructorId])
+  @@map("sections")
+}
+
+model Enrollment {
+  id        String           @id @default(uuid(7)) @db.Uuid
+  studentId String           @db.Uuid
+  student   User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  sectionId String           @db.Uuid
+  section   Section          @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  status    EnrollmentStatus @default(ACTIVE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([studentId, sectionId])
+  @@index([sectionId])
+  @@map("enrollments")
+}
+
+// ---------------------------------------------------------------------------
+// B. Assessments
+// ---------------------------------------------------------------------------
+
+model Assessment {
+  id              String           @id @default(uuid(7)) @db.Uuid
+  title           String
+  description     String?
+  status          AssessmentStatus @default(DRAFT)
+  courseId        String?          @db.Uuid
+  course          Course?          @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  sectionId       String?          @db.Uuid
+  section         Section?         @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  createdById     String           @db.Uuid
+  createdBy       User             @relation("AssessmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  durationMinutes Int?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  questions    AssessmentQuestion[]
+  examSessions ExamSession[]
+
+  @@index([status])
+  @@index([status, startsAt])
+  @@index([startsAt, endsAt])
+  @@index([courseId])
+  @@index([sectionId])
+  @@map("assessments")
+}
+
+// Explicit join between Assessment and Question.
+model AssessmentQuestion {
+  id           String     @id @default(uuid(7)) @db.Uuid
+  assessmentId String     @db.Uuid
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  questionId   String     @db.Uuid
+  question     Question   @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  position     Int
+  points       Decimal    @default(100) @db.Decimal(6, 2)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([assessmentId, questionId])
+  @@index([questionId])
+  @@map("assessment_questions")
+}
+
+// ---------------------------------------------------------------------------
+// C. Questions
+// ---------------------------------------------------------------------------
+
+model Question {
+  id            String             @id @default(uuid(7)) @db.Uuid
+  title         String
+  statement     String
+  constraints   String?
+  inputFormat   String?
+  outputFormat  String?
+  difficulty    QuestionDifficulty @default(MEDIUM)
+  // Advisory problem limits; concrete execution/sandbox config lives in the evaluator.
+  timeLimitMs   Int?
+  memoryLimitMb Int?
+  isArchived    Boolean            @default(false)
+  createdById   String?            @db.Uuid
+  createdBy     User?              @relation("QuestionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  languages           QuestionLanguage[]
+  testCases           TestCase[]
+  rubric              Rubric?
+  assessmentQuestions AssessmentQuestion[]
+  submissions         Submission[]
+  hintStages          HintStage[]
+  hintUsages          HintUsage[]
+
+  @@index([difficulty])
+  @@index([isArchived])
+  @@map("questions")
+}
+
+// Per-question language enablement + starter code. Avoids a JSON blob and an enum array.
+model QuestionLanguage {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  questionId  String              @db.Uuid
+  question    Question            @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  language    ProgrammingLanguage
+  starterCode String?
+  isEnabled   Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@unique([questionId, language])
+  @@map("question_languages")
+}
+
+// ---------------------------------------------------------------------------
+// D. Test cases
+// ---------------------------------------------------------------------------
+
+model TestCase {
+  id             String             @id @default(uuid(7)) @db.Uuid
+  questionId     String             @db.Uuid
+  question       Question           @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  name           String?
+  input          String
+  expectedOutput String
+  // Default HIDDEN so a test is never exposed to students by accident.
+  visibility     TestCaseVisibility @default(HIDDEN)
+  category       TestCaseCategory   @default(STANDARD)
+  weight         Decimal            @default(1) @db.Decimal(6, 2)
+  position       Int                @default(0)
+  isActive       Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  results TestCaseResult[]
+
+  @@index([questionId, visibility])
+  @@index([questionId, position])
+  @@map("test_cases")
+}
+
+// ---------------------------------------------------------------------------
+// E. Rubric-based grading (Question -> Rubric -> RubricCriterion)
+// ---------------------------------------------------------------------------
+
+model Rubric {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  questionId  String   @unique @db.Uuid
+  question    Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  name        String?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  criteria RubricCriterion[]
+
+  @@map("rubrics")
+}
+
+model RubricCriterion {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  rubricId    String              @db.Uuid
+  rubric      Rubric              @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  type        RubricCriterionType
+  maxPoints   Decimal             @db.Decimal(6, 2)
+  position    Int                 @default(0)
+  // Machine-readable grading configuration for the evaluator (weights, thresholds,
+  // AST rules, ...). Structure is defined when the evaluator lands.
+  config      Json?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  scores CriterionScore[]
+
+  @@index([rubricId])
+  @@index([type])
+  @@map("rubric_criteria")
+}
+
+// ---------------------------------------------------------------------------
+// F. Exam sessions (a student's attempt at an assessment)
+// ---------------------------------------------------------------------------
+
+model ExamSession {
+  id            String            @id @default(uuid(7)) @db.Uuid
+  assessmentId  String            @db.Uuid
+  assessment    Assessment        @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  studentId     String            @db.Uuid
+  student       User              @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  attemptNumber Int               @default(1)
+  status        ExamSessionStatus @default(NOT_STARTED)
+  startedAt     DateTime?
+  submittedAt   DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  submissions Submission[]
+  violations  Violation[]
+  hintUsages  HintUsage[]
+
+  // Uniqueness of attempts now; "one ACTIVE attempt per student per assessment"
+  // is added later as a partial unique index (WHERE status IN NOT_STARTED/IN_PROGRESS).
+  @@unique([assessmentId, studentId, attemptNumber])
+  @@index([studentId, assessmentId])
+  @@index([assessmentId, status])
+  @@index([status, expiresAt])
+  @@map("exam_sessions")
+}
+
+// ---------------------------------------------------------------------------
+// G. Submissions (immutable code snapshots; full history preserved)
+// ---------------------------------------------------------------------------
+
+model Submission {
+  id            String              @id @default(uuid(7)) @db.Uuid
+  examSessionId String              @db.Uuid
+  examSession   ExamSession         @relation(fields: [examSessionId], references: [id], onDelete: Restrict)
+  questionId    String              @db.Uuid
+  question      Question            @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  language      ProgrammingLanguage
+  sourceCode    String
+  attemptNumber Int
+  status        SubmissionStatus    @default(QUEUED)
+  isFinal       Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  evaluationRuns EvaluationRun[]
+
+  @@unique([examSessionId, questionId, attemptNumber])
+  @@index([examSessionId, questionId])
+  @@index([status])
+  @@map("submissions")
+}
+
+// ---------------------------------------------------------------------------
+// H. Evaluation results (separate from the submission; async workers safe)
+// ---------------------------------------------------------------------------
+
+model EvaluationRun {
+  id               String              @id @default(uuid(7)) @db.Uuid
+  submissionId     String              @db.Uuid
+  submission       Submission          @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  runNumber        Int                 @default(1)
+  status           EvaluationRunStatus @default(PENDING)
+  totalScore       Decimal?            @db.Decimal(8, 2)
+  maxScore         Decimal?            @db.Decimal(8, 2)
+  executionTimeMs  Int?
+  memoryKb         Int?
+  // Free-form compiler/runtime summary (e.g. "gcc 13.2 / -O2"). Not provider config.
+  runtimeInfo      String?
+  errorType        String?
+  errorMessage     String?
+  // Isolated provider-specific payload (e.g. Judge0 tokens/ids). Never secrets.
+  providerMetadata Json?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  testCaseResults TestCaseResult[]
+  criterionScores CriterionScore[]
+
+  @@unique([submissionId, runNumber])
+  @@index([submissionId])
+  @@index([status])
+  @@map("evaluation_runs")
+}
+
+model TestCaseResult {
+  id              String               @id @default(uuid(7)) @db.Uuid
+  evaluationRunId String               @db.Uuid
+  evaluationRun   EvaluationRun        @relation(fields: [evaluationRunId], references: [id], onDelete: Cascade)
+  testCaseId      String               @db.Uuid
+  testCase        TestCase             @relation(fields: [testCaseId], references: [id], onDelete: Restrict)
+  status          TestCaseResultStatus
+  pointsAwarded   Decimal              @default(0) @db.Decimal(6, 2)
+  pointsPossible  Decimal              @default(0) @db.Decimal(6, 2)
+  executionTimeMs Int?
+  memoryKb        Int?
+  // Student's own program output/stderr for this case; API gates hidden-case exposure.
+  stdout          String?
+  stderr          String?
+  detail          Json?
+  createdAt       DateTime             @default(now())
+
+  @@unique([evaluationRunId, testCaseId])
+  @@index([evaluationRunId])
+  @@index([testCaseId])
+  @@map("test_case_results")
+}
+
+// Per-criterion partial credit - the core of approach-agnostic grading.
+model CriterionScore {
+  id                String          @id @default(uuid(7)) @db.Uuid
+  evaluationRunId   String          @db.Uuid
+  evaluationRun     EvaluationRun   @relation(fields: [evaluationRunId], references: [id], onDelete: Cascade)
+  rubricCriterionId String          @db.Uuid
+  rubricCriterion   RubricCriterion @relation(fields: [rubricCriterionId], references: [id], onDelete: Restrict)
+  pointsAwarded     Decimal         @db.Decimal(6, 2)
+  maxPoints         Decimal         @db.Decimal(6, 2)
+  notes             String?
+  // Machine-generated rationale / analyzer output backing the score.
+  detail            Json?
+  createdAt         DateTime        @default(now())
+
+  @@unique([evaluationRunId, rubricCriterionId])
+  @@index([evaluationRunId])
+  @@map("criterion_scores")
+}
+
+// ---------------------------------------------------------------------------
+// I. Proctoring / assessment integrity (evidence only; enforcement later)
+// ---------------------------------------------------------------------------
+
+model Violation {
+  id            String            @id @default(uuid(7)) @db.Uuid
+  examSessionId String            @db.Uuid
+  examSession   ExamSession       @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+  type          ViolationType
+  severity      ViolationSeverity @default(LOW)
+  occurredAt    DateTime          @default(now())
+  // Untrusted client-reported context (user agent, focus target, counts, ...).
+  detail        Json?
+  resolved      Boolean           @default(false)
+  resolvedAt    DateTime?
+  resolvedById  String?           @db.Uuid
+  resolvedBy    User?             @relation("ViolationResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime          @default(now())
+
+  @@index([examSessionId, occurredAt])
+  @@index([type])
+  @@map("violations")
+}
+
+// ---------------------------------------------------------------------------
+// J. Progressive AI hints (configuration + usage log; no LLM logic)
+// ---------------------------------------------------------------------------
+
+model HintStage {
+  id                 String           @id @default(uuid(7)) @db.Uuid
+  questionId         String           @db.Uuid
+  question           Question         @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  stageNumber        Int
+  title              String?
+  description        String?
+  deliveryType       HintDeliveryType @default(STATIC)
+  unlockDelaySeconds Int              @default(0)
+  // Static hint text; null for interactive/chatbot stages.
+  content            String?
+  isActive           Boolean          @default(true)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  usages HintUsage[]
+
+  @@unique([questionId, stageNumber])
+  @@index([questionId])
+  @@map("hint_stages")
+}
+
+model HintUsage {
+  id            String          @id @default(uuid(7)) @db.Uuid
+  hintStageId   String          @db.Uuid
+  hintStage     HintStage       @relation(fields: [hintStageId], references: [id], onDelete: Restrict)
+  examSessionId String          @db.Uuid
+  examSession   ExamSession     @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+  studentId     String          @db.Uuid
+  student       User            @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  // Denormalized for the "hint usage by session/question" access pattern.
+  questionId    String          @db.Uuid
+  question      Question        @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  status        HintUsageStatus @default(REQUESTED)
+  requestedAt   DateTime        @default(now())
+  unlockedAt    DateTime?
+  consumedAt    DateTime?
+  detail        Json?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([examSessionId, hintStageId])
+  @@index([examSessionId, questionId])
+  @@index([studentId])
+  @@map("hint_usages")
+}
+
+// ---------------------------------------------------------------------------
+// K. Auditability (lightweight foundation)
+// ---------------------------------------------------------------------------
+
+model AuditEvent {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  actorId    String?  @db.Uuid
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  // Dotted action key, e.g. "assessment.created", "result.published".
+  action     String
+  entityType String?
+  entityId   String?
+  summary    String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_events")
+}

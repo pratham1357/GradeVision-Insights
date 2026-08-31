@@ -10,14 +10,18 @@
     "pnpm": ">=9"
   },
   "scripts": {
-    "build": "pnpm -r --filter \"./packages/**\" build && pnpm -r --filter \"./apps/**\" --filter \"./services/**\" build",
+    "build": "pnpm -r --filter \"./packages/**\" --filter \"@gradevision/database\" build && pnpm -r --filter \"./apps/**\" --filter \"./services/**\" build",
     "dev": "pnpm -r --parallel dev",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
-    "clean": "pnpm -r exec rimraf dist .turbo *.tsbuildinfo"
+    "clean": "pnpm -r exec rimraf dist .turbo *.tsbuildinfo",
+    "db:generate": "pnpm --filter @gradevision/database generate",
+    "db:migrate": "pnpm --filter @gradevision/database migrate",
+    "db:seed": "pnpm --filter @gradevision/database seed",
+    "db:studio": "pnpm --filter @gradevision/database studio"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

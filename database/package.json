@@ -1,0 +1,45 @@
+{
+  "name": "@gradevision/database",
+  "version": "0.0.0",
+  "private": true,
+  "description": "GradeVision Insights PostgreSQL domain model, Prisma client, and seed data.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "prisma": {
+    "seed": "dotenv -e ../.env -- tsx prisma/seed.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rimraf dist *.tsbuildinfo",
+    "generate": "prisma generate",
+    "format:schema": "prisma format",
+    "validate": "dotenv -e ../.env -- prisma validate",
+    "migrate": "dotenv -e ../.env -- prisma migrate dev",
+    "migrate:deploy": "dotenv -e ../.env -- prisma migrate deploy",
+    "migrate:reset": "dotenv -e ../.env -- prisma migrate reset",
+    "seed": "dotenv -e ../.env -- tsx prisma/seed.ts",
+    "studio": "dotenv -e ../.env -- prisma studio",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3"
+  },
+  "devDependencies": {
+    "dotenv-cli": "^8.0.0",
+    "prisma": "6.19.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

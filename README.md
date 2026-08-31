@@ -9,19 +9,20 @@ and scale independently toward institution-scale deployment.
 
 ## Architecture
 
-| Layer          | Technology                                   |
-| -------------- | -------------------------------------------- |
-| Frontend       | React, Vite, TypeScript, Tailwind CSS        |
-| Backend API    | Node.js, Express, TypeScript, REST           |
-| Evaluation     | Dedicated `evaluator` service (TypeScript)   |
-| AI             | Dedicated `hint-engine` service (TypeScript) |
-| Database       | PostgreSQL + Prisma _(added later)_          |
-| Cache / live   | Redis _(added later)_                        |
-| Infrastructure | Docker, then Kubernetes _(added later)_      |
+| Layer          | Technology                                    |
+| -------------- | --------------------------------------------- |
+| Frontend       | React, Vite, TypeScript, Tailwind CSS         |
+| Backend API    | Node.js, Express, TypeScript, REST            |
+| Evaluation     | Dedicated `evaluator` service (TypeScript)    |
+| AI             | Dedicated `hint-engine` service (TypeScript)  |
+| Database       | PostgreSQL + Prisma (`@gradevision/database`) |
+| Cache / live   | Redis _(added later)_                         |
+| Infrastructure | Docker, then Kubernetes _(added later)_       |
 
-Services are independent packages with explicit boundaries. Inter-service communication,
-database access, Judge0, LLM providers, WebSockets, auth, and dashboards are **not** implemented
-yet — this repository currently provides the foundational development environment only.
+Services are independent packages with explicit boundaries. The PostgreSQL domain model
+(schema + seed) lives in `@gradevision/database`; see
+[docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md). Inter-service communication, Judge0, LLM
+providers, WebSockets, auth, and dashboards are **not** implemented yet.
 
 ## Repository structure
 
@@ -34,7 +35,8 @@ services/
   hint-engine/    AI hint/mentor service scaffold
 packages/
   shared/         Shared TypeScript types, schemas, constants
-database/prisma/  Prisma schema & migrations (placeholders, designed later)
+database/         @gradevision/database - Prisma schema, client, migrations, seed
+  prisma/         schema.prisma, migrations/, seed.ts
 infrastructure/
   docker/         Local dev containers (added progressively)
   kubernetes/     Orchestration manifests (added progressively)
@@ -46,12 +48,16 @@ scripts/          Repository automation scripts
 
 - **Node.js 24+** (see `.nvmrc`)
 - **pnpm 9+** (`corepack enable` or `npm install -g pnpm`)
+- **PostgreSQL 14+** running locally (or a connection string)
 - Docker Desktop _(optional today; required once local infrastructure lands)_
 
 ## Installation
 
 ```bash
-pnpm install
+pnpm install                 # installs deps and generates the Prisma client
+cp .env.example .env          # then set DATABASE_URL for your local PostgreSQL
+pnpm db:migrate               # apply migrations to your database
+pnpm db:seed                  # load the deterministic development dataset
 ```
 
 ## Development commands
@@ -65,6 +71,10 @@ pnpm install
 | `pnpm typecheck`                     | Run TypeScript checks across the workspace        |
 | `pnpm lint`                          | Run ESLint across the workspace                   |
 | `pnpm format`                        | Format the repository with Prettier               |
+| `pnpm db:generate`                   | Regenerate the Prisma client                      |
+| `pnpm db:migrate`                    | Create/apply a development migration              |
+| `pnpm db:seed`                       | Seed the development dataset                      |
+| `pnpm db:studio`                     | Open Prisma Studio                                |
 
 Copy `.env.example` to `.env` and adjust values as needed. Never commit a populated `.env`.
 
