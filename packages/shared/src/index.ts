@@ -5,3 +5,4 @@
  * Intentionally minimal for now - domain models are added in later tasks.
  */
 export * from "./constants.js";
+export * from "./api.js";

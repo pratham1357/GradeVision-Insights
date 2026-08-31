@@ -39,8 +39,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @gradevision/shared build
+      # Library packages must be built before the apps can typecheck against them.
       - run: pnpm --filter @gradevision/database generate
+      - run: pnpm --filter @gradevision/shared --filter @gradevision/database build
 
       - run: pnpm typecheck
       - run: pnpm lint

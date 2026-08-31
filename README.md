@@ -19,17 +19,19 @@ and scale independently toward institution-scale deployment.
 | Cache / live   | Redis _(added later)_                         |
 | Infrastructure | Docker, then Kubernetes _(added later)_       |
 
-Services are independent packages with explicit boundaries. The PostgreSQL domain model
-(schema + seed) lives in `@gradevision/database`; see
-[docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md). Inter-service communication, Judge0, LLM
-providers, WebSockets, auth, and dashboards are **not** implemented yet.
+Services are independent packages with explicit boundaries — see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The API is a layered Express app
+(`routes → controller → service → repository`) that reaches PostgreSQL only through the
+`@gradevision/database` package; the domain model is in
+[docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md). Authentication, domain CRUD, inter-service
+communication, Judge0, LLM providers, WebSockets, and dashboards are **not** implemented yet.
 
 ## Repository structure
 
 ```
 apps/
   web/            React + Vite + TypeScript client
-  api/            Express + TypeScript REST API (GET /health)
+  api/            Express + TypeScript REST API (layered; GET /api/v1/health)
 services/
   evaluator/      Code-evaluation service scaffold
   hint-engine/    AI hint/mentor service scaffold
@@ -66,7 +68,7 @@ pnpm db:seed                  # load the deterministic development dataset
 | ------------------------------------ | ------------------------------------------------- |
 | `pnpm dev`                           | Run every package's `dev` task in parallel        |
 | `pnpm --filter @gradevision/web dev` | Run only the web client (http://localhost:5173)   |
-| `pnpm --filter @gradevision/api dev` | Run only the API (http://localhost:4000)          |
+| `pnpm --filter @gradevision/api dev` | Run only the API (http://localhost:4000/api/v1)   |
 | `pnpm build`                         | Build `packages/*` then `apps/*` and `services/*` |
 | `pnpm typecheck`                     | Run TypeScript checks across the workspace        |
 | `pnpm lint`                          | Run ESLint across the workspace                   |

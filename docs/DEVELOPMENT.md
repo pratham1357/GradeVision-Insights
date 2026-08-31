@@ -69,12 +69,21 @@ pnpm --filter @gradevision/evaluator dev   # evaluator -> http://localhost:4100
 pnpm --filter @gradevision/hint-engine dev # hint-engine -> http://localhost:4200
 ```
 
-Smoke-test the API:
+Smoke-test the API (needs `DATABASE_URL` set and PostgreSQL running):
 
 ```bash
-curl http://localhost:4000/health
-# {"service":"api","status":"ok","timestamp":"..."}
+curl http://localhost:4000/api/v1/health
+# {"service":"api","status":"ok","timestamp":"...","uptimeSeconds":3,
+#  "checks":{"database":{"status":"up","latencyMs":5}}}
 ```
+
+`/health` (unversioned) still works as a temporary alias. `/api/v1` is the
+canonical prefix; requests to unimplemented routes return
+`{"error":{"code":"NOT_FOUND","message":"..."}}`.
+
+The API validates its environment on startup (`apps/api/src/env.ts`); a missing or
+invalid `DATABASE_URL` / port will exit with a readable message. `pnpm --filter
+@gradevision/api dev` loads the repo-root `.env` via `dotenv-cli`.
 
 ## 6. Quality gates (run before pushing)
 
@@ -93,10 +102,13 @@ pnpm build
   keep service boundaries explicit — no direct cross-service imports.
 - Prisma schema changes: edit `database/prisma/schema.prisma`, run `pnpm db:migrate`, commit the
   generated migration folder. Do not hand-edit applied migrations.
+- **API modules** follow `routes → controller → service → repository` with Zod validation at the
+  boundary (see `apps/api/src/modules/health` and [ARCHITECTURE.md](./ARCHITECTURE.md)). No Prisma
+  in route handlers; no `process.env` outside `apps/api/src/env.ts`.
 - Formatting is owned by Prettier; linting by ESLint. Do not hand-fight the formatter.
 
 ## Not set up yet (planned)
 
-Redis / live-session state, Judge0, LLM providers, WebSockets, authentication, API CRUD routes,
-proctoring enforcement, dashboards, and Docker/Kubernetes runtime. Do not add these without an
-explicit task.
+Redis / live-session state, Judge0, LLM providers, WebSockets, authentication, all domain CRUD
+(users/courses/assessments/questions), exam sessions, submissions, evaluation, proctoring
+enforcement, dashboards, and Docker/Kubernetes runtime. Do not add these without an explicit task.
