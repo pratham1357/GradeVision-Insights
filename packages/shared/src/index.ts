@@ -1,0 +1,7 @@
+/**
+ * @gradevision/shared
+ *
+ * Home for types, schemas, and constants shared across apps and services.
+ * Intentionally minimal for now - domain models are added in later tasks.
+ */
+export * from "./constants.js";

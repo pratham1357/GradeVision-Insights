@@ -1,0 +1,57 @@
+# ---------- Dependencies ----------
+node_modules/
+.pnpm-store/
+
+# ---------- Environment / Secrets ----------
+.env
+.env.*
+!.env.example
+
+# ---------- Build / Distribution ----------
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+
+# ---------- Vite ----------
+.vite/
+
+# ---------- Logs ----------
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ---------- Prisma (generated client only; schema & migrations stay tracked) ----------
+prisma/generated/
+database/prisma/generated/
+
+# ---------- Docker ----------
+docker-compose.override.yml
+
+# ---------- Kubernetes local/generated files ----------
+*.secret.yaml
+*.secrets.yaml
+
+# ---------- IDEs ----------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.iml
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ---------- Temporary files ----------
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
