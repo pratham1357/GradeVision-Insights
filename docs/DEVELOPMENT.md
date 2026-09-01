@@ -139,8 +139,29 @@ pnpm typecheck
 pnpm lint
 pnpm format:check
 pnpm build
-pnpm test        # vitest (apps/api) - auth suite; no database required (repository is mocked)
+pnpm test        # vitest (apps/api)
 ```
+
+`pnpm test` has two kinds of suites:
+
+- `auth` / `jwt` / `password` — mock the repository, no database.
+- `instructor` — a real integration test. It needs PostgreSQL running and the
+  schema migrated (`DATABASE_URL`, the seeded dev DB locally). It creates its own
+  fixtures under fixed `ffffffff-…` ids and removes them before and after, so seed
+  data is never touched.
+
+## Instructor workflow (manual check)
+
+1. `pnpm --filter @gradevision/api dev` and `pnpm --filter @gradevision/web dev`.
+2. Open http://localhost:5173, sign in as `instructor@example.edu` /
+   `instructor-dev-password`.
+3. Dashboard shows CS101 / Section A and the seeded draft assessment.
+4. Open a question → edit fields, toggle languages + starter code, add a VISIBLE
+   and a HIDDEN test case, add rubric criteria, save.
+5. Create an assessment for Section A, attach questions, set marks, reorder.
+6. Reload the page — everything persists.
+7. Signing in as `student1@example.edu` shows a "not an instructor" notice, and
+   the instructor API returns `403` for that token.
 
 ## 7. Conventions
 
@@ -151,15 +172,18 @@ pnpm test        # vitest (apps/api) - auth suite; no database required (reposit
 - Prisma schema changes: edit `database/prisma/schema.prisma`, run `pnpm db:migrate`, commit the
   generated migration folder. Do not hand-edit applied migrations.
 - **API modules** follow `routes → controller → service → repository` with Zod validation at the
-  boundary (see `apps/api/src/modules/health`, `apps/api/src/modules/auth`, and
+  boundary (see `apps/api/src/modules/questions` for the full pattern, and
   [ARCHITECTURE.md](./ARCHITECTURE.md)). No Prisma in route handlers; no `process.env` outside
   `apps/api/src/env.ts`. Protect a route with `requireAuth()` / `requireRole("INSTRUCTOR")` -
-  never an inline role check.
+  never an inline role check. Resource ownership is enforced in the **service** (against
+  `req.auth.userId`); a resource that isn't yours returns 404.
+- **Frontend** keeps API calls in `apps/web/src/lib/*-api.ts`, not in components; state is local
+  (+ the auth context). Add routes to `apps/web/src/App.tsx` only for features that exist.
 - Formatting is owned by Prettier; linting by ESLint. Do not hand-fight the formatter.
 
 ## Not set up yet (planned)
 
 Redis / live-session state, Judge0, LLM providers, WebSockets, user registration, password
-reset, refresh tokens, SSO, all domain CRUD (users/courses/assessments/questions), exam
-sessions, submissions, evaluation, proctoring enforcement, dashboards, and Docker/Kubernetes
-runtime. Do not add these without an explicit task.
+reset, refresh tokens, SSO, student-facing course/assessment access, exam sessions, submissions,
+evaluation, proctoring enforcement, and Docker/Kubernetes runtime. Do not add these without an
+explicit task.

@@ -1,3 +1,4 @@
+import { Prisma } from "@gradevision/database";
 import type { NextFunction, Request, Response } from "express";
 import type { ApiErrorBody } from "@gradevision/shared";
 import { z, ZodError } from "zod";
@@ -26,6 +27,15 @@ function normalize(err: unknown): ApiError {
   // express.json() rejects malformed bodies with a SyntaxError carrying `status`.
   if (err instanceof SyntaxError && "status" in err) {
     return new ApiError(400, "INVALID_JSON", "Request body is not valid JSON");
+  }
+
+  // Safety net for Prisma errors a service did not translate itself.
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (err.code === "P2025") return new ApiError(404, "NOT_FOUND", "Resource not found");
+    if (err.code === "P2002") return new ApiError(409, "CONFLICT", "That resource already exists");
+    if (err.code === "P2003") {
+      return new ApiError(409, "CONFLICT", "Operation violates a data constraint");
+    }
   }
 
   return ApiError.internal();

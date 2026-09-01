@@ -49,9 +49,10 @@ services/    app-wide infrastructure (database ping/disconnect)
 utils/       ApiError, response helpers, logger
 ```
 
-`modules/health` and `modules/auth` are fully implemented (routes → controller →
-service → repository). `users`, `courses`, `assessments`, and `questions`
-currently contain only their route boundary; CRUD is deferred.
+`modules/health`, `modules/auth`, `modules/courses`, `modules/assessments`, and
+`modules/questions` are implemented (routes → controller → service → repository).
+The last three are the instructor assessment-authoring slice (see below).
+`modules/users` is still a route boundary only.
 
 ### Request lifecycle
 
@@ -156,6 +157,73 @@ delivery, asymmetric keys (RS256/EdDSA) for multi-service verification, and
 institutional SSO/OAuth (OIDC) can be layered on without changing the
 `authenticate → authorize → controller` shape.
 
+## Instructor assessment-authoring
+
+The first product vertical slice: an instructor signs in, sees their sections,
+and builds assessments from coding questions (languages + starter code, VISIBLE /
+HIDDEN test cases, rubric criteria). No student-facing endpoints exist yet.
+
+### Endpoints (all `requireRole("INSTRUCTOR")`)
+
+```
+GET    /api/v1/courses                                  sections the instructor teaches (+ course)
+GET    /api/v1/courses/sections/:sectionId              one owned section
+
+GET    /api/v1/assessments                              the instructor's assessments
+POST   /api/v1/assessments                              create (always DRAFT)
+GET    /api/v1/assessments/:id                          detail incl. ordered questions
+PATCH  /api/v1/assessments/:id                          edit fields (DRAFT only) / status transition
+POST   /api/v1/assessments/:id/questions                attach an owned question (marks)
+PATCH  /api/v1/assessments/:id/questions/:questionId    change marks / position
+DELETE /api/v1/assessments/:id/questions/:questionId    detach
+POST   /api/v1/assessments/:id/questions/reorder        set full question order
+
+GET    /api/v1/questions                                the instructor's question bank
+POST   /api/v1/questions                                create (title, statement, difficulty, languages…)
+GET    /api/v1/questions/:id                            full detail (languages, test cases, rubric)
+PUT    /api/v1/questions/:id                            replace scalar fields + language set
+POST   /api/v1/questions/:id/test-cases                 add a VISIBLE or HIDDEN case
+PATCH  /api/v1/questions/:id/test-cases/:testCaseId     edit
+DELETE /api/v1/questions/:id/test-cases/:testCaseId     delete
+GET    /api/v1/questions/:id/rubric                     rubric + ordered criteria
+PUT    /api/v1/questions/:id/rubric/criteria            sync the criteria list (create/update/delete/reorder)
+```
+
+### Ownership & authorization
+
+Every request is `authenticate → requireRole("INSTRUCTOR") → controller → service`.
+The service is the authorization boundary: it re-derives ownership from
+`req.auth.userId` on every call — a section by `section.instructorId`, an
+assessment by its section's instructor (or `createdById` for a section-less
+draft), a question by `question.createdById`, and test cases / rubric criteria
+transitively through their question.
+
+**IDOR is prevented by scoping, not by hiding buttons.** Repository queries carry
+the ownership predicate (`findFirst({ where: { id, createdById } })`), so another
+instructor's id in the URL simply does not match. A resource that exists but
+isn't yours returns **404**, not 403, so existence isn't confirmed. (403 is only
+for the role gate — a STUDENT hitting an instructor route.)
+
+### Assessment lifecycle (MVP)
+
+New assessments are `DRAFT`. Content fields (`title`, `description`,
+`durationMinutes`) and question changes are allowed only while `DRAFT`
+(otherwise `409 ASSESSMENT_NOT_EDITABLE`). Status may move
+`DRAFT ↔ SCHEDULED`, `→ CLOSED`, `→ ARCHIVED`, and `CLOSED → DRAFT`; `ACTIVE` and
+the exam-run lifecycle are deferred. Questions are shared entities linked through
+`AssessmentQuestion` (never copied); the join row carries `position` and `points`.
+
+### Frontend
+
+`apps/web` is a small React Router app. `RequireInstructor` guards the instructor
+routes: it renders login when anonymous and a "not an instructor" notice for a
+STUDENT — but this is UX only; the API enforces the same independently. API calls
+go through `src/lib/instructor-api.ts` (typed wrappers over `apiRequest`) and the
+`useApi` hook; there is no global state library. Mutations return the refreshed
+resource so a component replaces its state without merging. Pages: `/login`,
+`/dashboard`, `/assessments/new`, `/assessments/:id`, `/questions/new`,
+`/questions/:id`.
+
 ## Service boundaries: evaluator & hint-engine
 
 `services/evaluator` (compiler-driven execution + grading) and
@@ -168,8 +236,8 @@ _inside_ the evaluator, not in the API or the database.
 ## Deferred (not in this codebase yet)
 
 User registration, password reset, email verification, refresh tokens, token
-revocation, OAuth / SSO; all domain CRUD (users, courses, assessments,
-questions), exam sessions, submissions, evaluation, Judge0 and code execution,
-AST/semantic analysis, proctoring enforcement, Socket.IO, AI/LLM integration,
-hint timers, Redis / live-session state, rate limiting, Helmet/CSRF, Kubernetes,
-and production deployment. Each is a separate task.
+revocation, OAuth / SSO; student-facing course/assessment access, exam sessions,
+submissions, evaluation, Judge0 and code execution, AST/semantic analysis,
+proctoring enforcement, Socket.IO, AI/LLM integration, hint timers, Redis /
+live-session state, rate limiting, Helmet/CSRF, Kubernetes, and production
+deployment. Each is a separate task.

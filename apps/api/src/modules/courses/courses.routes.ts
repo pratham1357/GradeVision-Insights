@@ -1,13 +1,18 @@
 import { Router } from "express";
 
+import { requireRole, validateParams } from "../../middleware/index.js";
+import { getSection, listCourses } from "./courses.controller.js";
+import { sectionParamsSchema } from "./courses.schema.js";
+
 /**
- * Courses module boundary (courses, sections, enrollment).
+ * Courses / sections (instructor-facing).
  *
- * Layering mirrors `modules/health`:
- *   courses.routes -> courses.controller -> courses.service -> courses.repository
- * Validation via a Zod schema + `validateBody`; data access via
- * `@gradevision/database` only.
- *
- * No routes yet - course CRUD is deferred.
+ * Every endpoint here is instructor-only for now. When student-facing course
+ * endpoints arrive they get their own sub-router rather than relaxing this guard.
  */
 export const coursesRouter: Router = Router();
+
+coursesRouter.use(...requireRole("INSTRUCTOR"));
+
+coursesRouter.get("/", listCourses);
+coursesRouter.get("/sections/:sectionId", validateParams(sectionParamsSchema), getSection);

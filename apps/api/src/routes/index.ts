@@ -11,8 +11,10 @@ import { usersRouter } from "../modules/users/users.routes.js";
  * Central API router, mounted at `API_PREFIX` (`/api/v1`).
  *
  * Domain routers are registered here so the surface is visible in one place.
- * `health` and `auth` are implemented; the rest are empty module boundaries.
- * Planned but deferred: /exams, /submissions, /evaluations, /proctoring, /hints.
+ * `health`, `auth`, `courses`, `assessments`, and `questions` are implemented
+ * (the last three are instructor-facing for the assessment-authoring workflow).
+ * `users` is still a boundary. Planned but deferred: /exams, /submissions,
+ * /evaluations, /proctoring, /hints, and student-facing course/assessment access.
  */
 export const apiRouter: Router = Router();
 

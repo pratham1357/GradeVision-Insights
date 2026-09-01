@@ -23,17 +23,19 @@ Services are independent packages with explicit boundaries — see
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The API is a layered Express app
 (`routes → controller → service → repository`) that reaches PostgreSQL only through the
 `@gradevision/database` package; the domain model is in
-[docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md). Authentication is first-stage JWT access tokens
-(login + current-user + role middleware). Registration, refresh tokens, SSO, domain CRUD,
-inter-service communication, Judge0, LLM providers, WebSockets, and dashboards are **not**
+[docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md). Implemented so far: first-stage JWT auth
+(login / current-user / role middleware) and the **instructor assessment-authoring**
+workflow (courses & sections, assessments, coding questions, VISIBLE/HIDDEN test cases,
+rubric criteria) with a small React instructor console. Student-facing access, exam
+sessions, submissions, evaluation, Judge0, LLM providers, and WebSockets are **not**
 implemented yet.
 
 ## Repository structure
 
 ```
 apps/
-  web/            React + Vite + TypeScript client
-  api/            Express + TypeScript REST API (layered; /api/v1/health, /api/v1/auth)
+  web/            React + Vite instructor console (React Router, Tailwind)
+  api/            Express + TypeScript REST API (layered; /api/v1/{health,auth,courses,assessments,questions})
 services/
   evaluator/      Code-evaluation service scaffold
   hint-engine/    AI hint/mentor service scaffold
