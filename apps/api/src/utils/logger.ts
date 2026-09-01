@@ -13,6 +13,8 @@ const LEVEL_ORDER: Record<Level, number> = {
 const threshold = env.isProduction ? LEVEL_ORDER.info : LEVEL_ORDER.debug;
 
 function emit(level: Level, message: string, meta?: Record<string, unknown>): void {
+  // Keep the test runner output clean; opt back in with TEST_LOG=1.
+  if (env.isTest && !process.env.TEST_LOG) return;
   if (LEVEL_ORDER[level] > threshold) return;
 
   const timestamp = new Date().toISOString();

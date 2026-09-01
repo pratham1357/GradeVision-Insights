@@ -17,6 +17,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r run test",
     "clean": "pnpm -r exec rimraf dist .turbo *.tsbuildinfo",
     "db:generate": "pnpm --filter @gradevision/database generate",
     "db:migrate": "pnpm --filter @gradevision/database migrate",

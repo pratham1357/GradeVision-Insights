@@ -23,15 +23,17 @@ Services are independent packages with explicit boundaries — see
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The API is a layered Express app
 (`routes → controller → service → repository`) that reaches PostgreSQL only through the
 `@gradevision/database` package; the domain model is in
-[docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md). Authentication, domain CRUD, inter-service
-communication, Judge0, LLM providers, WebSockets, and dashboards are **not** implemented yet.
+[docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md). Authentication is first-stage JWT access tokens
+(login + current-user + role middleware). Registration, refresh tokens, SSO, domain CRUD,
+inter-service communication, Judge0, LLM providers, WebSockets, and dashboards are **not**
+implemented yet.
 
 ## Repository structure
 
 ```
 apps/
   web/            React + Vite + TypeScript client
-  api/            Express + TypeScript REST API (layered; GET /api/v1/health)
+  api/            Express + TypeScript REST API (layered; /api/v1/health, /api/v1/auth)
 services/
   evaluator/      Code-evaluation service scaffold
   hint-engine/    AI hint/mentor service scaffold
@@ -57,7 +59,7 @@ scripts/          Repository automation scripts
 
 ```bash
 pnpm install                 # installs deps and generates the Prisma client
-cp .env.example .env          # then set DATABASE_URL for your local PostgreSQL
+cp .env.example .env          # then set DATABASE_URL and JWT_SECRET (>= 32 chars)
 pnpm db:migrate               # apply migrations to your database
 pnpm db:seed                  # load the deterministic development dataset
 ```
@@ -72,6 +74,7 @@ pnpm db:seed                  # load the deterministic development dataset
 | `pnpm build`                         | Build `packages/*` then `apps/*` and `services/*` |
 | `pnpm typecheck`                     | Run TypeScript checks across the workspace        |
 | `pnpm lint`                          | Run ESLint across the workspace                   |
+| `pnpm test`                          | Run tests (vitest; `apps/api` auth suite)         |
 | `pnpm format`                        | Format the repository with Prettier               |
 | `pnpm db:generate`                   | Regenerate the Prisma client                      |
 | `pnpm db:migrate`                    | Create/apply a development migration              |

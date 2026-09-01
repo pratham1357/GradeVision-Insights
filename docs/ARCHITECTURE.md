@@ -18,7 +18,16 @@ apps/web ──HTTP──▶ apps/api ──▶ @gradevision/database ──▶ 
 `VITE_API_BASE_URL` and knows nothing about the database or Prisma. The canonical
 API base path is `/api/v1` (`API_V1_PREFIX` in `@gradevision/shared`). The client
 and API share only the small HTTP contract in `@gradevision/shared` (response
-envelopes, the version prefix) — never Prisma types.
+envelopes, the version prefix, `AuthUser` / `UserRole`) — never Prisma types.
+
+Auth plumbing only (no login UI yet): `src/lib/api-client.ts` (prefixes `/api/v1`,
+attaches the bearer token, unwraps `{ data }` / `{ error }`), `src/lib/auth-storage.ts`
+(the single place a token is stored), and `src/lib/auth-context.tsx`
+(`AuthProvider` / `useAuth`). **Security tradeoff:** the token currently lives in
+`localStorage` (XSS-readable). `auth-storage.ts` is the only file that touches
+storage and `api-client.ts` the only one that sends the header, so moving to an
+`httpOnly` cookie later is a two-file change, not an architecture change. The JWT
+secret never exists in the frontend.
 
 ## API layered architecture (`apps/api/src`)
 
@@ -40,9 +49,9 @@ services/    app-wide infrastructure (database ping/disconnect)
 utils/       ApiError, response helpers, logger
 ```
 
-`modules/health` is fully implemented (routes → controller → service → DB ping)
-and is the reference for the pattern. `users`, `courses`, `assessments`, and
-`questions` currently contain only their route boundary; CRUD is deferred.
+`modules/health` and `modules/auth` are fully implemented (routes → controller →
+service → repository). `users`, `courses`, `assessments`, and `questions`
+currently contain only their route boundary; CRUD is deferred.
 
 ### Request lifecycle
 
@@ -83,6 +92,70 @@ can be unit-tested without Express, reused by non-HTTP callers (queue workers,
 scripts), and kept free of framework details. Prisma calls never appear in a
 route handler.
 
+## Authentication & authorization
+
+First stage: **stateless HS256 JWT access tokens**. No refresh tokens, no
+sessions table, no SSO yet.
+
+```
+Client
+  │  POST /api/v1/auth/login  { email, password }
+  ▼
+API  ── loginSchema (Zod, email normalised) ──▶ auth.service.login
+                                                  │  findUserByEmail
+                                                  │  verifyPassword (Argon2id)
+                                                  │  isActive?
+                                                  ▼
+                                          signAccessToken  → { accessToken, user }
+  │
+  │  Authorization: Bearer <jwt>   (on every subsequent request)
+  ▼
+authenticate ──▶ verify signature + expiry ──▶ req.auth = { userId, role }   (401 on any failure)
+  ▼
+requireRole(...) ──▶ req.auth.role ∈ allowed?   (403 if not)
+  ▼
+controller ──▶ service ──▶ repository
+```
+
+**Password hashing** — Argon2id via `@node-rs/argon2` (prebuilt native bindings;
+no build toolchain on any platform). Parameters follow the OWASP 2024 cheat
+sheet (19 MiB / t=2 / p=1). `hashPassword` / `verifyPassword` live in
+`modules/auth/password.ts`; `User.passwordHash` stays a hash and is never
+returned by the API. Unknown-email logins still run a dummy verify so response
+timing does not reveal whether an account exists.
+
+**JWT contents** — `{ sub: <userId>, role: <UserRole>, iat, exp }` and nothing
+else: no name, no email, no password, no mutable state. Secret and lifetime come
+from `JWT_SECRET` / `JWT_EXPIRES_IN` (validated in `env.ts`; the API refuses to
+start without a ≥32-char secret). The secret is never logged and never reaches
+the frontend.
+
+**Authentication vs authorization** — separate middleware. `authenticate`
+answers "who is this?" purely from the verified token (identity/role from the
+request body is never trusted). `requireRole(...roles)` answers "may they?" and
+returns 403 for an authenticated user without a listed role. `requireAuth()` /
+`requireRole()` are factories returning `[authenticate, ...]`, so a route opts in
+explicitly and role checks never live inside controllers.
+
+**Account status** — `authenticate` only checks the token, so a token stays
+technically valid until it expires. `GET /auth/me` re-loads the user on every
+call and rejects (401) a user who has been deleted or deactivated. Any future
+endpoint needing fresh status does the same via the repository.
+
+**Current limitations** (documented, to be addressed later):
+
+- No token revocation / blacklist. A leaked or stale token is usable until `exp`
+  (kept short — default 15 min). Deactivating a user blocks new logins and
+  `/auth/me`, but not an in-flight token on other endpoints until they add a
+  status re-check.
+- Role changes are not reflected in an already-issued token until it expires.
+- Single symmetric secret (HS256); no key rotation.
+
+**Future** — refresh tokens (rotating, persisted, revocable), `httpOnly` cookie
+delivery, asymmetric keys (RS256/EdDSA) for multi-service verification, and
+institutional SSO/OAuth (OIDC) can be layered on without changing the
+`authenticate → authorize → controller` shape.
+
 ## Service boundaries: evaluator & hint-engine
 
 `services/evaluator` (compiler-driven execution + grading) and
@@ -94,8 +167,9 @@ _inside_ the evaluator, not in the API or the database.
 
 ## Deferred (not in this codebase yet)
 
-Authentication / JWT / password hashing / RBAC, all domain CRUD (users, courses,
-assessments, questions), exam sessions, submissions, evaluation, Judge0 and code
-execution, AST/semantic analysis, proctoring enforcement, Socket.IO, AI/LLM
-integration, hint timers, Redis / live-session state, rate limiting, Helmet/CSRF,
-Kubernetes, and production deployment. Each is a separate task.
+User registration, password reset, email verification, refresh tokens, token
+revocation, OAuth / SSO; all domain CRUD (users, courses, assessments,
+questions), exam sessions, submissions, evaluation, Judge0 and code execution,
+AST/semantic analysis, proctoring enforcement, Socket.IO, AI/LLM integration,
+hint timers, Redis / live-session state, rate limiting, Helmet/CSRF, Kubernetes,
+and production deployment. Each is a separate task.

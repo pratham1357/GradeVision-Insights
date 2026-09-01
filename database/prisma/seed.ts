@@ -19,8 +19,21 @@ import {
 
 const prisma = new PrismaClient();
 
-// Fake placeholder only. Real password hashing arrives with authentication.
-const DEV_PASSWORD_HASH = "dev-placeholder-not-a-real-hash";
+/**
+ * DEVELOPMENT-ONLY credentials. Never use these anywhere real.
+ *
+ *   instructor@example.edu   ->  instructor-dev-password
+ *   student1@example.edu     ->  student-dev-password
+ *   student2@example.edu     ->  student-dev-password
+ *
+ * The values below are pre-computed Argon2id hashes (m=19456, t=2, p=1) of those
+ * passwords - hard-coded so the seed stays deterministic and needs no crypto
+ * dependency. They are verified by the API's `verifyPassword` at login.
+ */
+const INSTRUCTOR_PASSWORD_HASH =
+  "$argon2id$v=19$m=19456,t=2,p=1$vEnhhhWdFBqheoAydsybqQ$8GQMqr0xkXnoV7OpEYkMlp7SrM0s9M9Vxnaoz/iDzdU";
+const STUDENT_PASSWORD_HASH =
+  "$argon2id$v=19$m=19456,t=2,p=1$mpOuUrj4ATdQESCnCUuheA$4d6Pqekb47N/wNQinPoMty2DbUSG0xcRvqL0ogKVg0E";
 
 // Stable ids so reseeding is idempotent.
 const ids = {
@@ -46,37 +59,41 @@ const ids = {
 async function main(): Promise<void> {
   const instructor = await prisma.user.upsert({
     where: { email: "instructor@example.edu" },
-    update: { name: "Dev Instructor", role: UserRole.INSTRUCTOR },
+    update: {
+      name: "Dev Instructor",
+      role: UserRole.INSTRUCTOR,
+      passwordHash: INSTRUCTOR_PASSWORD_HASH,
+    },
     create: {
       id: ids.instructor,
       email: "instructor@example.edu",
       name: "Dev Instructor",
       role: UserRole.INSTRUCTOR,
-      passwordHash: DEV_PASSWORD_HASH,
+      passwordHash: INSTRUCTOR_PASSWORD_HASH,
     },
   });
 
   const student1 = await prisma.user.upsert({
     where: { email: "student1@example.edu" },
-    update: { name: "Dev Student One" },
+    update: { name: "Dev Student One", passwordHash: STUDENT_PASSWORD_HASH },
     create: {
       id: ids.student1,
       email: "student1@example.edu",
       name: "Dev Student One",
       role: UserRole.STUDENT,
-      passwordHash: DEV_PASSWORD_HASH,
+      passwordHash: STUDENT_PASSWORD_HASH,
     },
   });
 
   const student2 = await prisma.user.upsert({
     where: { email: "student2@example.edu" },
-    update: { name: "Dev Student Two" },
+    update: { name: "Dev Student Two", passwordHash: STUDENT_PASSWORD_HASH },
     create: {
       id: ids.student2,
       email: "student2@example.edu",
       name: "Dev Student Two",
       role: UserRole.STUDENT,
-      passwordHash: DEV_PASSWORD_HASH,
+      passwordHash: STUDENT_PASSWORD_HASH,
     },
   });
 

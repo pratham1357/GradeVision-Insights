@@ -21,6 +21,10 @@ const EnvSchema = z.object({
     .string()
     .min(1, "DATABASE_URL is required")
     .refine((value) => URL.canParse(value), "DATABASE_URL must be a valid connection URL"),
+
+  // Authentication (first-stage access tokens; no refresh tokens yet).
+  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
+  JWT_EXPIRES_IN: z.string().min(1).default("15m"),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -52,6 +56,9 @@ export const env = Object.freeze({
     .filter(Boolean),
 
   DATABASE_URL: raw.DATABASE_URL,
+
+  JWT_SECRET: raw.JWT_SECRET,
+  JWT_EXPIRES_IN: raw.JWT_EXPIRES_IN,
 });
 
 export type Env = typeof env;
