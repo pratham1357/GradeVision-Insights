@@ -290,6 +290,7 @@ model Question {
   rubric              Rubric?
   assessmentQuestions AssessmentQuestion[]
   submissions         Submission[]
+  submissionDrafts    SubmissionDraft[]
   hintStages          HintStage[]
   hintUsages          HintUsage[]
 
@@ -399,6 +400,7 @@ model ExamSession {
   updatedAt     DateTime          @updatedAt
 
   submissions Submission[]
+  drafts      SubmissionDraft[]
   violations  Violation[]
   hintUsages  HintUsage[]
 
@@ -435,6 +437,26 @@ model Submission {
   @@index([examSessionId, questionId])
   @@index([status])
   @@map("submissions")
+}
+
+// Mutable per-question code buffer for an in-progress exam session - the "editor
+// buffer" a live-session layer (Redis) will eventually hold. Kept as a small
+// table so autosave survives a page reload without adding infrastructure now.
+// One row per (session, question); `Submission` remains the immutable history.
+model SubmissionDraft {
+  id            String              @id @default(uuid(7)) @db.Uuid
+  examSessionId String              @db.Uuid
+  examSession   ExamSession         @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+  questionId    String              @db.Uuid
+  question      Question            @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  language      ProgrammingLanguage
+  sourceCode    String
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@unique([examSessionId, questionId])
+  @@index([examSessionId])
+  @@map("submission_drafts")
 }
 
 // ---------------------------------------------------------------------------

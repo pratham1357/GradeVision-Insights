@@ -43,7 +43,9 @@ const ids = {
   course: "00000000-0000-4000-8000-000000000010",
   section: "00000000-0000-4000-8000-000000000020",
   assessment: "00000000-0000-4000-8000-000000000030",
+  activeAssessment: "00000000-0000-4000-8000-000000000031",
   question: "00000000-0000-4000-8000-000000000040",
+  question2: "00000000-0000-4000-8000-000000000041",
   rubric: "00000000-0000-4000-8000-000000000050",
   criterionFunctional: "00000000-0000-4000-8000-000000000051",
   criterionApproach: "00000000-0000-4000-8000-000000000052",
@@ -314,6 +316,85 @@ async function main(): Promise<void> {
     },
   });
 
+  // --- Second question, so the student exam has real question navigation -----
+  const question2 = await prisma.question.upsert({
+    where: { id: ids.question2 },
+    update: {},
+    create: {
+      id: ids.question2,
+      title: "Greet by Name",
+      statement: "Read a name from standard input and print `Hello, <name>!`.",
+      constraints: "The name is a single non-empty line, at most 100 characters.",
+      inputFormat: "One line containing the name.",
+      outputFormat: "One line: `Hello, <name>!`",
+      difficulty: QuestionDifficulty.EASY,
+      timeLimitMs: 2000,
+      memoryLimitMb: 256,
+      createdById: instructor.id,
+      languages: {
+        create: [
+          {
+            language: ProgrammingLanguage.PYTHON,
+            starterCode: "name = input()\n# your code here\n",
+          },
+          {
+            language: ProgrammingLanguage.JAVASCRIPT,
+            starterCode:
+              "const name = require('fs').readFileSync(0, 'utf8').trim();\n// your code here\n",
+          },
+        ],
+      },
+      testCases: {
+        create: [
+          {
+            name: "Sample",
+            input: "Ada\n",
+            expectedOutput: "Hello, Ada!\n",
+            visibility: TestCaseVisibility.VISIBLE,
+            category: TestCaseCategory.SAMPLE,
+            weight: 0,
+            position: 0,
+          },
+          {
+            name: "Hidden",
+            input: "Grace\n",
+            expectedOutput: "Hello, Grace!\n",
+            visibility: TestCaseVisibility.HIDDEN,
+            category: TestCaseCategory.STANDARD,
+            weight: 1,
+            position: 1,
+          },
+        ],
+      },
+    },
+  });
+
+  // --- An ACTIVE assessment a seeded student can actually take --------------
+  const activeAssessment = await prisma.assessment.upsert({
+    where: { id: ids.activeAssessment },
+    update: { status: AssessmentStatus.ACTIVE },
+    create: {
+      id: ids.activeAssessment,
+      title: "CS101 - Live Coding Assessment",
+      description: "An in-progress assessment for the student exam workflow.",
+      status: AssessmentStatus.ACTIVE,
+      courseId: course.id,
+      sectionId: section.id,
+      createdById: instructor.id,
+      durationMinutes: 60,
+    },
+  });
+
+  for (const [position, q] of [question, question2].entries()) {
+    await prisma.assessmentQuestion.upsert({
+      where: {
+        assessmentId_questionId: { assessmentId: activeAssessment.id, questionId: q.id },
+      },
+      update: { position, points: 100 },
+      create: { assessmentId: activeAssessment.id, questionId: q.id, position, points: 100 },
+    });
+  }
+
   await prisma.hintStage.upsert({
     where: { questionId_stageNumber: { questionId: question.id, stageNumber: 1 } },
     update: {},
@@ -347,8 +428,8 @@ async function main(): Promise<void> {
     users: [instructor.email, student1.email, student2.email],
     course: course.code,
     section: section.name,
-    assessment: assessment.title,
-    question: question.title,
+    assessments: [`${assessment.title} (DRAFT)`, `${activeAssessment.title} (ACTIVE)`],
+    questions: [question.title, question2.title],
   });
 }
 

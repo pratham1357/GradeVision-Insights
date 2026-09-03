@@ -49,9 +49,10 @@ services/    app-wide infrastructure (database ping/disconnect)
 utils/       ApiError, response helpers, logger
 ```
 
-`modules/health`, `modules/auth`, `modules/courses`, `modules/assessments`, and
-`modules/questions` are implemented (routes → controller → service → repository).
-The last three are the instructor assessment-authoring slice (see below).
+`modules/health`, `modules/auth`, `modules/courses`, `modules/assessments`,
+`modules/questions`, and `modules/student` are implemented (routes → controller →
+service → repository). `courses` / `assessments` / `questions` are the instructor
+authoring slice; `student` is the student assessment-taking slice (both below).
 `modules/users` is still a route boundary only.
 
 ### Request lifecycle
@@ -215,14 +216,76 @@ the exam-run lifecycle are deferred. Questions are shared entities linked throug
 
 ### Frontend
 
-`apps/web` is a small React Router app. `RequireInstructor` guards the instructor
-routes: it renders login when anonymous and a "not an instructor" notice for a
-STUDENT — but this is UX only; the API enforces the same independently. API calls
-go through `src/lib/instructor-api.ts` (typed wrappers over `apiRequest`) and the
-`useApi` hook; there is no global state library. Mutations return the refreshed
-resource so a component replaces its state without merging. Pages: `/login`,
-`/dashboard`, `/assessments/new`, `/assessments/:id`, `/questions/new`,
-`/questions/:id`.
+`apps/web` is a small React Router app with two guarded areas -
+`RequireInstructor` and `RequireStudent` (`components/RequireRole.tsx`); `/`
+sends each role to its home. Guards are UX only; the API enforces the same
+independently. API calls go through `src/lib/instructor-api.ts` /
+`src/lib/student-api.ts` (typed wrappers over `apiRequest`) and the `useApi`
+hook; there is no global state library. Instructor pages: `/dashboard`,
+`/assessments/*`, `/questions/*`.
+
+## Student assessment-taking
+
+The second product slice: a student takes a timed, live assessment.
+
+### Endpoints (all `requireRole("STUDENT")`)
+
+```
+GET  /api/v1/student/assessments                                  ACTIVE assessments the student is enrolled for
+POST /api/v1/student/assessments/:assessmentId/session            start or resume the (single) attempt
+GET  /api/v1/student/sessions/:sessionId                          full exam view + server-authoritative timing
+POST /api/v1/student/sessions/:sessionId/finish                   end the whole attempt (-> SUBMITTED)
+PUT  /api/v1/student/sessions/:sessionId/questions/:qid/draft     save / autosave code (idempotent upsert)
+POST /api/v1/student/sessions/:sessionId/questions/:qid/submissions  submit a code snapshot (-> QUEUED)
+```
+
+### Eligibility & ownership
+
+Discovery is filtered in the query: `assessment.status = ACTIVE` **and** the
+student has an `ACTIVE` `Enrollment` in the assessment's section **and** `now` is
+within `startsAt`/`endsAt` if set. A DRAFT/SCHEDULED/CLOSED assessment is never
+visible or startable.
+
+Every session/draft/submission operation loads the session with
+`where: { id, studentId: req.auth.userId }` - another student's id in the URL
+simply doesn't match, so it is a **404**. Drafts and submissions are reached only
+_through_ an owned session, so they inherit that scoping. Hidden test cases are
+excluded at the query level (`where: { visibility: "VISIBLE" }` + a narrow
+`select`), so their input/output never leaves the database on a student request.
+
+### Sessions, time, and state
+
+- **One attempt per student per assessment** (`attemptNumber = 1`, enforced by
+  `@@unique([assessmentId, studentId, attemptNumber])`). Starting again while
+  `IN_PROGRESS` resumes the same session; starting after it is
+  `SUBMITTED`/`EXPIRED` is a `409`. A concurrent double-start loses the P2002
+  race gracefully and returns the winning session.
+- **`expiresAt` is computed and persisted at start** (`startedAt + durationMinutes`,
+  or `endsAt`, or `null` for no limit). Server time is authoritative: every
+  session read and every draft/submit re-checks `now > expiresAt` and persists
+  `EXPIRED`. Each response carries `SessionTiming` (`status`, `expiresAt`,
+  `serverTime`, `remainingSeconds`); the frontend countdown is derived from that,
+  never from the device clock, and re-syncs on every write.
+- After expiry: draft/submit return `409`; the exam view still returns the saved
+  drafts and submissions (work is preserved, editing is locked).
+- **`SubmissionDraft`** (new table) is the mutable per-question editor buffer -
+  one row per `(session, question)`, `upsert`ed on autosave. This is state the
+  schema comment earmarks for Redis "later"; a small table keeps autosave durable
+  across a reload without adding infrastructure now, and the API surface will not
+  change when Redis fronts or replaces it. `Submission` stays the immutable
+  history (one row per submit, `attemptNumber` incrementing, `status = QUEUED`).
+  Evaluation is a **separate future task** - nothing runs the code.
+
+### Student frontend
+
+`src/lib/student-api.ts` + `useApi`. Pages: `/student` (available assessments,
+start/resume) and `/student/exam/:sessionId` (`ExamPage`). The exam page holds
+editor buffers locally, autosaves the current question (debounced, plus on
+question/language switch), shows a save indicator, and runs a display-only
+countdown seeded from `SessionTiming`. A reload re-fetches the session and
+restores every draft. Monaco is via `@monaco-editor/react` (loaded on demand);
+`src/lib/monaco.ts` maps GradeVision language ids to Monaco's. The editor is an
+authoring surface only - it never executes code.
 
 ## Service boundaries: evaluator & hint-engine
 
@@ -236,8 +299,7 @@ _inside_ the evaluator, not in the API or the database.
 ## Deferred (not in this codebase yet)
 
 User registration, password reset, email verification, refresh tokens, token
-revocation, OAuth / SSO; student-facing course/assessment access, exam sessions,
-submissions, evaluation, Judge0 and code execution, AST/semantic analysis,
-proctoring enforcement, Socket.IO, AI/LLM integration, hint timers, Redis /
-live-session state, rate limiting, Helmet/CSRF, Kubernetes, and production
-deployment. Each is a separate task.
+revocation, OAuth / SSO; evaluation of submissions, Judge0 and code execution,
+AST/semantic analysis, results/scoring, proctoring enforcement, Socket.IO,
+AI/LLM integration, hint timers, Redis / live-session state, rate limiting,
+Helmet/CSRF, Kubernetes, and production deployment. Each is a separate task.

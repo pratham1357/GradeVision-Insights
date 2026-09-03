@@ -55,9 +55,10 @@ pnpm --filter @gradevision/shared --filter @gradevision/database build
 Set `DATABASE_URL` in `.env` to your local PostgreSQL, then:
 
 ```bash
-pnpm db:migrate    # create/apply the dev migration (database/prisma/migrations)
-pnpm db:seed       # deterministic dev data: 1 instructor, 2 students, 1 course/section,
-                   # 1 draft assessment, 1 question, 4 test cases, a 3-criterion rubric
+pnpm db:migrate    # create/apply dev migrations (database/prisma/migrations)
+pnpm db:seed       # deterministic dev data: 1 instructor, 2 enrolled students, CS101 / Section A,
+                   # a DRAFT assessment (instructor authoring) + an ACTIVE one (student exam),
+                   # 2 questions, test cases (visible + hidden), a 3-criterion rubric
 pnpm db:studio     # browse the data
 ```
 
@@ -145,23 +146,38 @@ pnpm test        # vitest (apps/api)
 `pnpm test` has two kinds of suites:
 
 - `auth` / `jwt` / `password` — mock the repository, no database.
-- `instructor` — a real integration test. It needs PostgreSQL running and the
-  schema migrated (`DATABASE_URL`, the seeded dev DB locally). It creates its own
-  fixtures under fixed `ffffffff-…` ids and removes them before and after, so seed
-  data is never touched.
+- `instructor` / `student` — real integration tests. They need PostgreSQL running
+  and the schema migrated (`DATABASE_URL`, the seeded dev DB locally). Each
+  creates its own fixtures under fixed `ffffffff-…` / `eeeeeeee-…` ids and removes
+  them before and after, so seed data is never touched.
 
 ## Instructor workflow (manual check)
 
 1. `pnpm --filter @gradevision/api dev` and `pnpm --filter @gradevision/web dev`.
-2. Open http://localhost:5173, sign in as `instructor@example.edu` /
-   `instructor-dev-password`.
-3. Dashboard shows CS101 / Section A and the seeded draft assessment.
+2. http://localhost:5173, sign in as `instructor@example.edu` / `instructor-dev-password`.
+3. Dashboard shows CS101 / Section A and the seeded **DRAFT** assessment.
 4. Open a question → edit fields, toggle languages + starter code, add a VISIBLE
    and a HIDDEN test case, add rubric criteria, save.
 5. Create an assessment for Section A, attach questions, set marks, reorder.
 6. Reload the page — everything persists.
-7. Signing in as `student1@example.edu` shows a "not an instructor" notice, and
-   the instructor API returns `403` for that token.
+7. As `student1@example.edu` the instructor URLs redirect / the API returns `403`.
+
+## Student workflow (manual check)
+
+1. Same dev servers. Sign in as `student1@example.edu` / `student-dev-password`.
+2. `/student` lists **CS101 - Live Coding Assessment** (the seeded ACTIVE one).
+3. **Start assessment** → the exam page opens with a countdown, question sidebar,
+   problem statement + examples, language selector, and the Monaco editor seeded
+   with the starter code.
+4. Edit the code — the save indicator shows "Saving…" then "Saved HH:MM:SS".
+5. Reload the page — your code is still there (loaded from the server draft).
+6. **Submit this question** → a submission is recorded (`QUEUED`); it is _not_
+   evaluated (that is the next task).
+7. **Finish exam** → the end screen; re-opening the assessment is no longer
+   offered, and the API rejects further saves/submits with `409`.
+
+Monaco is fetched from a CDN by `@monaco-editor/react`, so the editor needs
+network access the first time it loads.
 
 ## 7. Conventions
 
@@ -184,6 +200,5 @@ pnpm test        # vitest (apps/api)
 ## Not set up yet (planned)
 
 Redis / live-session state, Judge0, LLM providers, WebSockets, user registration, password
-reset, refresh tokens, SSO, student-facing course/assessment access, exam sessions, submissions,
-evaluation, proctoring enforcement, and Docker/Kubernetes runtime. Do not add these without an
-explicit task.
+reset, refresh tokens, SSO, **evaluation of submissions**, results / scoring, proctoring
+enforcement, and Docker/Kubernetes runtime. Do not add these without an explicit task.
