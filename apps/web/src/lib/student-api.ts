@@ -1,8 +1,11 @@
 import type {
   ExamSessionView,
+  HintRequestResult,
   ProgrammingLanguage,
+  QuestionHintsView,
   SaveDraftResult,
   StudentAssessmentSummary,
+  SubmissionResultView,
   SubmitResult,
 } from "@gradevision/shared";
 
@@ -41,5 +44,17 @@ export const studentApi = {
     apiRequest<SubmitResult>(`/student/sessions/${sessionId}/questions/${questionId}/submissions`, {
       method: "POST",
       ...json(body),
+    }),
+
+  getSubmissionResult: (submissionId: string) =>
+    apiRequest<SubmissionResultView>(`/student/submissions/${submissionId}`),
+
+  listHints: (sessionId: string, questionId: string) =>
+    apiRequest<QuestionHintsView>(`/student/sessions/${sessionId}/questions/${questionId}/hints`),
+
+  requestHint: (sessionId: string, questionId: string, stageNumber: number) =>
+    apiRequest<HintRequestResult>(`/student/sessions/${sessionId}/questions/${questionId}/hints`, {
+      method: "POST",
+      ...json({ stageNumber }),
     }),
 };

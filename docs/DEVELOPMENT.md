@@ -171,13 +171,45 @@ pnpm test        # vitest (apps/api)
    with the starter code.
 4. Edit the code — the save indicator shows "Saving…" then "Saved HH:MM:SS".
 5. Reload the page — your code is still there (loaded from the server draft).
-6. **Submit this question** → a submission is recorded (`QUEUED`); it is _not_
-   evaluated (that is the next task).
-7. **Finish exam** → the end screen; re-opening the assessment is no longer
+6. **Submit this question** → a submission is recorded (`QUEUED`). If the
+   evaluator is running it is picked up within a couple of seconds; the status
+   badge moves `Queued → Evaluating → Scored X/Y` and a result panel appears
+   with the passed/failed test summary, rubric breakdown, and feedback.
+7. **Hints** panel per question: request stage 1 (conceptual), then later stages
+   unlock as you use the previous one and the delay elapses. Stage 4 is the AI
+   mentor — it needs the hint-engine plus `GEMINI_API_KEY`; without a key it
+   shows a clear "not configured" message and static hints still work.
+8. **Finish exam** → the end screen; re-opening the assessment is no longer
    offered, and the API rejects further saves/submits with `409`.
 
 Monaco is fetched from a CDN by `@monaco-editor/react`, so the editor needs
 network access the first time it loads.
+
+## Evaluation, hints & sandbox (services)
+
+```bash
+# 1. Infrastructure (Postgres + Redis + self-hosted Judge0)
+docker compose -f infrastructure/docker/docker-compose.yml up -d
+#    Postgres and Redis alone:
+docker compose -f infrastructure/docker/docker-compose.yml up -d postgres redis
+
+# 2. Point .env at them (all optional - see .env.example)
+#    JUDGE0_URL=http://localhost:2358     # omit -> runs FAIL with a clear reason
+#    REDIS_URL=redis://localhost:6379     # omit -> evaluator polls Postgres
+#    GEMINI_API_KEY=...                   # omit -> interactive hints return 503
+
+# 3. Run the services
+pnpm --filter @gradevision/evaluator dev     # -> http://localhost:4100/health
+pnpm --filter @gradevision/hint-engine dev   # -> http://localhost:4200/health
+```
+
+- **No Judge0?** Everything else still works; automated runs are persisted as
+  `FAILED` with `EXECUTION_UNAVAILABLE`. Judge0 needs privileged containers /
+  cgroup v1 — on Docker Desktop it may not start; that is expected locally.
+- **The Python AST analyzer** shells out to `PYTHON_BIN` (`python3` by default).
+  Set it to `python` on Windows if `python3` is not on PATH, or empty to disable.
+- **Instructor results:** as `instructor@example.edu`, open the ACTIVE
+  assessment → **View results** for the per-student / per-question table.
 
 ## 7. Conventions
 
@@ -199,6 +231,6 @@ network access the first time it loads.
 
 ## Not set up yet (planned)
 
-Redis / live-session state, Judge0, LLM providers, WebSockets, user registration, password
-reset, refresh tokens, SSO, **evaluation of submissions**, results / scoring, proctoring
-enforcement, and Docker/Kubernetes runtime. Do not add these without an explicit task.
+WebSockets / live monitoring, user registration, password reset, refresh tokens,
+SSO, proctoring enforcement, multi-attempt exams, and Kubernetes runtime. Do not
+add these without an explicit task.

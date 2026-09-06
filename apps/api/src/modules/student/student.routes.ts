@@ -4,16 +4,21 @@ import { requireRole, validateBody, validateParams } from "../../middleware/inde
 import {
   finishExamSession,
   getExamSession,
+  getSubmissionResultView,
   listAvailableAssessments,
+  listQuestionHints,
+  requestQuestionHint,
   saveQuestionDraft,
   startExamSession,
   submitQuestion,
 } from "./student.controller.js";
 import {
   assessmentParamsSchema,
+  requestHintSchema,
   saveDraftSchema,
   sessionParamsSchema,
   sessionQuestionParamsSchema,
+  submissionParamsSchema,
   submitSchema,
 } from "./student.schema.js";
 
@@ -50,4 +55,22 @@ studentRouter.post(
   validateParams(sessionQuestionParamsSchema),
   validateBody(submitSchema),
   submitQuestion,
+);
+
+studentRouter.get(
+  "/sessions/:sessionId/questions/:questionId/hints",
+  validateParams(sessionQuestionParamsSchema),
+  listQuestionHints,
+);
+studentRouter.post(
+  "/sessions/:sessionId/questions/:questionId/hints",
+  validateParams(sessionQuestionParamsSchema),
+  validateBody(requestHintSchema),
+  requestQuestionHint,
+);
+
+studentRouter.get(
+  "/submissions/:submissionId",
+  validateParams(submissionParamsSchema),
+  getSubmissionResultView,
 );

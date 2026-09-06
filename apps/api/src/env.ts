@@ -25,6 +25,17 @@ const EnvSchema = z.object({
   // Authentication (first-stage access tokens; no refresh tokens yet).
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   JWT_EXPIRES_IN: z.string().min(1).default("15m"),
+
+  // Optional Redis; when set, submissions are enqueued for the evaluator instead
+  // of relying on its PostgreSQL polling fallback. The API never blocks on it.
+  REDIS_URL: z.string().min(1).optional(),
+
+  // Backend-only AI hint provider (the hint-engine service). Never called from
+  // the browser; the API proxies interactive hint requests to it.
+  HINT_ENGINE_URL: z.string().min(1).default("http://localhost:4200"),
+
+  // Shared secret sent as a bearer token on API -> internal service calls.
+  INTERNAL_SERVICE_TOKEN: z.string().min(1).optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -59,6 +70,10 @@ export const env = Object.freeze({
 
   JWT_SECRET: raw.JWT_SECRET,
   JWT_EXPIRES_IN: raw.JWT_EXPIRES_IN,
+
+  REDIS_URL: raw.REDIS_URL ?? null,
+  HINT_ENGINE_URL: raw.HINT_ENGINE_URL.replace(/\/+$/, ""),
+  INTERNAL_SERVICE_TOKEN: raw.INTERNAL_SERVICE_TOKEN ?? null,
 });
 
 export type Env = typeof env;

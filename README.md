@@ -9,15 +9,15 @@ and scale independently toward institution-scale deployment.
 
 ## Architecture
 
-| Layer          | Technology                                    |
-| -------------- | --------------------------------------------- |
-| Frontend       | React, Vite, TypeScript, Tailwind CSS         |
-| Backend API    | Node.js, Express, TypeScript, REST            |
-| Evaluation     | Dedicated `evaluator` service (TypeScript)    |
-| AI             | Dedicated `hint-engine` service (TypeScript)  |
-| Database       | PostgreSQL + Prisma (`@gradevision/database`) |
-| Cache / live   | Redis _(added later)_                         |
-| Infrastructure | Docker, then Kubernetes _(added later)_       |
+| Layer          | Technology                                                    |
+| -------------- | ------------------------------------------------------------- |
+| Frontend       | React, Vite, TypeScript, Tailwind CSS                         |
+| Backend API    | Node.js, Express, TypeScript, REST                            |
+| Evaluation     | `evaluator` service + Judge0 sandbox + `@gradevision/grading` |
+| AI             | `hint-engine` service + Gemini (env-driven `LLMProvider`)     |
+| Database       | PostgreSQL + Prisma (`@gradevision/database`)                 |
+| Cache / queue  | Redis + BullMQ (`@gradevision/queue`) — optional              |
+| Infrastructure | Docker Compose (Kubernetes _added later_)                     |
 
 Services are independent packages with explicit boundaries — see
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The API is a layered Express app
@@ -27,8 +27,11 @@ Services are independent packages with explicit boundaries — see
 the **instructor assessment-authoring** workflow (courses/sections, assessments, coding
 questions, VISIBLE/HIDDEN test cases, rubric criteria), and the **student
 assessment-taking** workflow (discovery, timed exam sessions, autosaving Monaco editor,
-per-question submissions) — with a small React console for each role. Evaluation of
-submissions, Judge0, LLM providers, and WebSockets are **not** implemented yet.
+per-question submissions), and the **automated evaluation pipeline** (async
+Judge0-backed execution of visible + hidden tests, deterministic rubric/semantic
+grading, student + instructor results) plus **progressive AI hints** (static
+stages then an env-configured LLM mentor) — with a small React console for each
+role. WebSockets / live proctoring are **not** implemented yet.
 
 ## Repository structure
 
@@ -37,14 +40,16 @@ apps/
   web/            React + Vite console — instructor authoring + student exam (React Router, Tailwind, Monaco)
   api/            Express + TypeScript REST API (layered; /api/v1/{health,auth,courses,assessments,questions,student})
 services/
-  evaluator/      Code-evaluation service scaffold
-  hint-engine/    AI hint/mentor service scaffold
+  evaluator/      Async submission evaluation: BullMQ/poll → Judge0 → grading → persist
+  hint-engine/    Backend-only progressive-hint LLM provider (Gemini via fetch)
 packages/
   shared/         Shared TypeScript types, schemas, constants
+  grading/        Pure deterministic scoring engine (functional + rubric + semantic)
+  queue/          BullMQ evaluation-queue wiring (optional Redis)
 database/         @gradevision/database - Prisma schema, client, migrations, seed
   prisma/         schema.prisma, migrations/, seed.ts
 infrastructure/
-  docker/         Local dev containers (added progressively)
+  docker/         docker-compose.yml (Postgres + Redis + self-hosted Judge0)
   kubernetes/     Orchestration manifests (added progressively)
 docs/             Project documentation
 scripts/          Repository automation scripts
@@ -55,7 +60,9 @@ scripts/          Repository automation scripts
 - **Node.js 24+** (see `.nvmrc`)
 - **pnpm 9+** (`corepack enable` or `npm install -g pnpm`)
 - **PostgreSQL 14+** running locally (or a connection string)
-- Docker Desktop _(optional today; required once local infrastructure lands)_
+- Docker _(optional — needed for the self-hosted Judge0 sandbox and Redis; see
+  [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md))_
+- `python3` on PATH _(optional — powers the Python AST semantic analyzer)_
 
 ## Installation
 
@@ -87,5 +94,13 @@ Copy `.env.example` to `.env` and adjust values as needed. Never commit a popula
 
 ## Infrastructure
 
-Docker and Kubernetes configuration will be added progressively as services mature. The
-`infrastructure/` directory currently holds placeholders only.
+`infrastructure/docker/docker-compose.yml` brings up PostgreSQL, Redis, and a
+self-hosted Judge0 sandbox for local development:
+
+```bash
+docker compose -f infrastructure/docker/docker-compose.yml up -d
+```
+
+All three are optional — the API and evaluator degrade cleanly without Redis
+(PostgreSQL polling) or Judge0 (runs marked `FAILED` with a clear reason).
+Kubernetes manifests will be added progressively.

@@ -2,30 +2,66 @@ import { Prisma, type ProgrammingLanguage } from "@gradevision/database";
 import type {
   ExamQuestion,
   ExamSessionView,
+  HintRequestResult,
+  HintStageView,
+  QuestionHintsView,
   SaveDraftResult,
   SessionTiming,
   StudentAssessmentSummary,
+  SubmissionResultView,
   SubmitResult,
 } from "@gradevision/shared";
 
 import { ApiError } from "../../utils/api-error.js";
+import { enqueueEvaluation } from "../../services/evaluation-queue.js";
 import {
+  HintProviderUnavailableError,
+  requestInteractiveHint,
+} from "../../services/hint-engine.js";
+import { toEvaluationDetail } from "../results/mapper.js";
+import {
+  createHintUsage,
   createSession,
   createSubmissionInSession,
   findAssessmentQuestionLink,
   findEligibleAssessment,
   findExistingSession,
+  findHintStage,
+  findHintUsage,
+  findQuestionForHintContext,
   findSessionMeta,
+  findSubmissionResultForStudent,
+  latestSubmissionCode,
   listEligibleAssessments,
+  loadQuestionHints,
   loadSessionView,
+  markHintUsageConsumed,
   questionSupportsLanguage,
   updateSessionStatus,
   upsertDraft,
 } from "./student.repository.js";
-import type { SaveDraftInput, SubmitInput } from "./student.schema.js";
+import type { RequestHintInput, SaveDraftInput, SubmitInput } from "./student.schema.js";
 
 type SessionMeta = NonNullable<Awaited<ReturnType<typeof findSessionMeta>>>;
 type SessionViewRow = Awaited<ReturnType<typeof loadSessionView>>;
+type SessionRunRow = SessionViewRow["submissions"][number]["evaluationRuns"][number];
+
+/** Compact evaluation status for the exam view (lighter than the full result). */
+function summariseSessionRun(run: SessionRunRow | null) {
+  if (!run) return null;
+  const graded = run.testCaseResults.filter((r) => r.status !== "SKIPPED");
+  const total = run.totalScore === null ? null : Number(run.totalScore);
+  const max = run.maxScore === null ? null : Number(run.maxScore);
+  return {
+    status: run.status,
+    score: total,
+    maxScore: max,
+    scorePercent:
+      total !== null && max !== null && max > 0 ? Math.round((total / max) * 100) : null,
+    testsPassed: graded.filter((r) => r.status === "PASSED").length,
+    testsTotal: graded.length,
+  };
+}
 
 function computeTiming(
   session: {
@@ -235,6 +271,7 @@ async function buildSessionView(sessionId: string, now: Date): Promise<ExamSessi
         status: s.status,
         attemptNumber: s.attemptNumber,
         createdAt: s.createdAt.toISOString(),
+        evaluation: summariseSessionRun(s.evaluationRuns[0] ?? null),
       })),
     };
   });
@@ -304,6 +341,10 @@ export async function submitCode(
     sourceCode: input.sourceCode,
   });
 
+  // Best-effort: nudge the evaluator. Without Redis this is a no-op and the
+  // evaluator's PostgreSQL poller picks the QUEUED row up instead.
+  await enqueueEvaluation(submission.id);
+
   return {
     submission: {
       id: submission.id,
@@ -312,7 +353,234 @@ export async function submitCode(
       status: submission.status,
       attemptNumber: submission.attemptNumber,
       createdAt: submission.createdAt.toISOString(),
+      evaluation: null,
     },
     timing: computeTiming(meta, now),
+  };
+}
+
+// --- Results ---------------------------------------------------------------
+
+export async function getSubmissionResult(
+  submissionId: string,
+  studentId: string,
+): Promise<SubmissionResultView> {
+  const submission = await findSubmissionResultForStudent(submissionId, studentId);
+  if (!submission) {
+    // 404 (not 403) so another student's submission id is not confirmed to exist.
+    throw ApiError.notFound("Submission not found");
+  }
+  return {
+    submissionId: submission.id,
+    questionId: submission.questionId,
+    questionTitle: submission.question.title,
+    attemptNumber: submission.attemptNumber,
+    language: submission.language,
+    submittedAt: submission.createdAt.toISOString(),
+    submissionStatus: submission.status,
+    evaluation: toEvaluationDetail(submission.evaluationRuns[0] ?? null),
+  };
+}
+
+// --- Progressive hints ----------------------------------------------------
+
+interface HintUsageRow {
+  status: "REQUESTED" | "UNLOCKED" | "CONSUMED";
+  requestedAt: Date;
+  consumedAt: Date | null;
+  detail: Prisma.JsonValue | null;
+}
+
+/** The hint text already delivered for a usage row (static content or stored AI text). */
+function usageHintText(
+  stageContent: string | null,
+  detail: Prisma.JsonValue | null,
+): string | null {
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const hint = (detail as Record<string, unknown>).hint;
+    if (typeof hint === "string" && hint.length > 0) return hint;
+  }
+  return stageContent;
+}
+
+function secondsSince(from: Date | null, now: Date): number {
+  if (!from) return Number.POSITIVE_INFINITY;
+  return Math.floor((now.getTime() - from.getTime()) / 1000);
+}
+
+export async function getQuestionHints(
+  sessionId: string,
+  questionId: string,
+  studentId: string,
+): Promise<QuestionHintsView> {
+  const meta = await loadOwnedSessionMeta(sessionId, studentId);
+  if (!(await findAssessmentQuestionLink(meta.assessmentId, questionId))) {
+    throw ApiError.notFound("Question is not part of this assessment");
+  }
+
+  const now = new Date();
+  const stages = await loadQuestionHints(questionId, sessionId);
+  const elapsed = secondsSince(meta.startedAt, now);
+
+  const views: HintStageView[] = stages.map((stage, index) => {
+    const usage = (stage.usages[0] ?? null) as HintUsageRow | null;
+    const previousUsed = index === 0 || stages[index - 1]!.usages.length > 0;
+    const delayOk = elapsed >= stage.unlockDelaySeconds;
+
+    let lockedReason: string | null = null;
+    if (!usage) {
+      if (!previousUsed) lockedReason = "Use the previous hint first";
+      else if (!delayOk) {
+        lockedReason = `Available ${stage.unlockDelaySeconds - elapsed}s from now`;
+      }
+    }
+
+    const consumed = usage?.status === "CONSUMED";
+    return {
+      stageNumber: stage.stageNumber,
+      title: stage.title,
+      description: stage.description,
+      deliveryType: stage.deliveryType,
+      unlockDelaySeconds: stage.unlockDelaySeconds,
+      available: !usage && previousUsed && delayOk && meta.status === "IN_PROGRESS",
+      lockedReason,
+      status: usage?.status ?? null,
+      content: consumed ? usageHintText(stage.content, usage?.detail ?? null) : null,
+      requestedAt: usage?.requestedAt.toISOString() ?? null,
+    };
+  });
+
+  return { questionId, stages: views };
+}
+
+export async function requestHint(
+  sessionId: string,
+  questionId: string,
+  input: RequestHintInput,
+  studentId: string,
+): Promise<HintRequestResult> {
+  const now = new Date();
+  const meta = await loadOwnedSessionMeta(sessionId, studentId);
+  await ensureSessionIsActive(meta, now);
+  if (!(await findAssessmentQuestionLink(meta.assessmentId, questionId))) {
+    throw ApiError.notFound("Question is not part of this assessment");
+  }
+
+  const stage = await findHintStage(questionId, input.stageNumber);
+  if (!stage) {
+    throw ApiError.notFound("Hint stage not found");
+  }
+
+  // Idempotent: a stage already requested for this session returns its content.
+  const existing = await findHintUsage(sessionId, stage.id);
+  if (existing?.status === "CONSUMED") {
+    const text = usageHintText(stage.content, existing.detail);
+    if (text) {
+      return {
+        stageNumber: stage.stageNumber,
+        deliveryType: stage.deliveryType,
+        status: "CONSUMED",
+        content: text,
+        source: stage.deliveryType === "STATIC" ? "static" : "ai",
+      };
+    }
+  }
+
+  // Progression: stage 1, or the previous stage has been requested.
+  if (stage.stageNumber > 1) {
+    const prev = await findHintStage(questionId, stage.stageNumber - 1);
+    const prevUsage = prev ? await findHintUsage(sessionId, prev.id) : null;
+    if (!prevUsage) {
+      throw new ApiError(409, "HINT_LOCKED", "Use the previous hint before this one");
+    }
+  }
+
+  const elapsed = secondsSince(meta.startedAt, now);
+  if (elapsed < stage.unlockDelaySeconds) {
+    throw new ApiError(
+      409,
+      "HINT_LOCKED",
+      `This hint unlocks ${stage.unlockDelaySeconds - elapsed}s from now`,
+    );
+  }
+
+  if (stage.deliveryType === "STATIC") {
+    const content = stage.content?.trim();
+    if (!content) {
+      throw new ApiError(409, "HINT_UNAVAILABLE", "This hint has no content configured");
+    }
+    if (existing) {
+      await markHintUsageConsumed(existing.id);
+    } else {
+      await createHintUsage({
+        hintStageId: stage.id,
+        examSessionId: sessionId,
+        studentId,
+        questionId,
+        status: "CONSUMED",
+      });
+    }
+    return {
+      stageNumber: stage.stageNumber,
+      deliveryType: "STATIC",
+      status: "CONSUMED",
+      content,
+      source: "static",
+    };
+  }
+
+  // INTERACTIVE: call the backend hint-engine with the minimum context.
+  const question = await findQuestionForHintContext(questionId);
+  const latest = await latestSubmissionCode(sessionId, questionId);
+  const priorStages = await loadQuestionHints(questionId, sessionId);
+  const previousHints = priorStages
+    .filter((s) => s.stageNumber < stage.stageNumber && s.usages[0]?.status === "CONSUMED")
+    .map((s) => usageHintText(s.content, s.usages[0]?.detail ?? null))
+    .filter((t): t is string => Boolean(t));
+
+  let hint: string;
+  try {
+    hint = await requestInteractiveHint({
+      stageNumber: stage.stageNumber,
+      language: latest?.language ?? "PYTHON",
+      questionTitle: question?.title ?? "this problem",
+      questionStatement: question?.statement ?? "",
+      studentCode: latest?.sourceCode ?? null,
+      previousHints,
+    });
+  } catch (error) {
+    if (error instanceof HintProviderUnavailableError) {
+      throw new ApiError(503, "HINT_PROVIDER_UNAVAILABLE", error.message);
+    }
+    throw error;
+  }
+
+  const detail = { hint } satisfies Prisma.InputJsonObject;
+  if (existing) {
+    await markHintUsageConsumed(existing.id, detail);
+  } else {
+    try {
+      await createHintUsage({
+        hintStageId: stage.id,
+        examSessionId: sessionId,
+        studentId,
+        questionId,
+        status: "CONSUMED",
+        detail,
+      });
+    } catch (error) {
+      // Lost a race with a concurrent identical request.
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) {
+        throw error;
+      }
+    }
+  }
+
+  return {
+    stageNumber: stage.stageNumber,
+    deliveryType: "INTERACTIVE",
+    status: "CONSUMED",
+    content: hint,
+    source: "ai",
   };
 }

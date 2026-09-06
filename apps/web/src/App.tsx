@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { HomeRedirect } from "./components/HomeRedirect";
 import { RequireInstructor, RequireStudent } from "./components/RequireRole";
 import { AssessmentEditorPage } from "./pages/AssessmentEditorPage";
+import { AssessmentResultsPage } from "./pages/AssessmentResultsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ExamPage } from "./pages/ExamPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -25,6 +26,7 @@ export function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/assessments/new" element={<AssessmentEditorPage />} />
         <Route path="/assessments/:assessmentId" element={<AssessmentEditorPage />} />
+        <Route path="/assessments/:assessmentId/results" element={<AssessmentResultsPage />} />
         <Route path="/questions/new" element={<QuestionEditorPage />} />
         <Route path="/questions/:questionId" element={<QuestionEditorPage />} />
       </Route>

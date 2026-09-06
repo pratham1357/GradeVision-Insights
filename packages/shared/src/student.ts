@@ -5,6 +5,7 @@
  * mirror the Prisma enums (the API asserts they stay in sync). Hidden test-case
  * data is never part of any student-facing type.
  */
+import type { SubmissionEvaluationSummary } from "./evaluation.js";
 import type { ProgrammingLanguage, QuestionDifficulty } from "./instructor.js";
 
 export const EXAM_SESSION_STATUSES = [
@@ -62,6 +63,8 @@ export interface ExamSubmissionSummary {
   status: SubmissionStatus;
   attemptNumber: number;
   createdAt: string;
+  /** Automated-evaluation status for this submission; `null` until a run exists. */
+  evaluation: SubmissionEvaluationSummary | null;
 }
 
 export interface ExamQuestion {

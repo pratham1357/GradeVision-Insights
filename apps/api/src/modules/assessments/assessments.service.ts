@@ -1,4 +1,12 @@
-import type { AssessmentDetail, AssessmentStatus, AssessmentSummary } from "@gradevision/shared";
+import type {
+  AssessmentDetail,
+  AssessmentStatus,
+  AssessmentSummary,
+  EvaluationRunStatus,
+  InstructorAssessmentResults,
+  InstructorResultQuestionScore,
+  InstructorResultRow,
+} from "@gradevision/shared";
 
 import { ApiError } from "../../utils/api-error.js";
 import { findInstructorSection } from "../courses/courses.repository.js";
@@ -12,6 +20,7 @@ import {
   findOwnedAssessmentMeta,
   listAssessmentQuestionIds,
   listInstructorAssessments,
+  loadAssessmentResults,
   nextQuestionPosition,
   reorderAssessmentQuestions,
   updateAssessment,
@@ -210,6 +219,113 @@ export async function removeAssessmentQuestion(
   }
   await detachQuestion(assessmentId, questionId);
   return getInstructorAssessment(assessmentId, instructorId);
+}
+
+// --- Results --------------------------------------------------------------
+
+type ResultsRow = NonNullable<Awaited<ReturnType<typeof loadAssessmentResults>>>;
+type SessionRow = ResultsRow["examSessions"][number];
+type SubmissionRow = SessionRow["submissions"][number];
+
+function scoreSubmission(
+  submission: SubmissionRow | undefined,
+  points: number,
+): {
+  cell: Omit<InstructorResultQuestionScore, "questionId" | "title" | "position" | "points">;
+  earned: number;
+} {
+  const run = submission?.evaluationRuns[0] ?? null;
+  const graded = run?.testCaseResults.filter((r) => r.status !== "SKIPPED") ?? [];
+  const total = run?.totalScore == null ? null : Number(run.totalScore);
+  const max = run?.maxScore == null ? null : Number(run.maxScore);
+  const scorePercent =
+    total !== null && max !== null && max > 0 ? Math.round((total / max) * 100) : null;
+  // Gradebook value: scale the question's points by the rubric percentage.
+  const earned = scorePercent === null ? 0 : Math.round((points * scorePercent) / 100);
+  return {
+    cell: {
+      submissionStatus: submission?.status ?? null,
+      evaluationStatus: (run?.status as EvaluationRunStatus | undefined) ?? null,
+      score: total,
+      maxScore: max,
+      scorePercent,
+      testsPassed: graded.filter((r) => r.status === "PASSED").length,
+      testsTotal: graded.length,
+    },
+    earned,
+  };
+}
+
+export async function getAssessmentResults(
+  assessmentId: string,
+  instructorId: string,
+): Promise<InstructorAssessmentResults> {
+  const assessment = await loadAssessmentResults(assessmentId, instructorId);
+  if (!assessment) {
+    throw ApiError.notFound("Assessment not found");
+  }
+
+  const questions = assessment.questions.map((link) => ({
+    questionId: link.questionId,
+    title: link.question.title,
+    position: link.position,
+    points: Number(link.points),
+  }));
+
+  const sessionByStudent = new Map<string, SessionRow>();
+  for (const session of assessment.examSessions) {
+    sessionByStudent.set(session.studentId, session);
+  }
+
+  const students: InstructorResultRow[] = assessment.section
+    ? assessment.section.enrollments
+        .map((enrollment) => {
+          const session = sessionByStudent.get(enrollment.studentId) ?? null;
+          const latestByQuestion = new Map<string, SubmissionRow>();
+          for (const submission of session?.submissions ?? []) {
+            if (!latestByQuestion.has(submission.questionId)) {
+              latestByQuestion.set(submission.questionId, submission);
+            }
+          }
+
+          let totalScore = 0;
+          let maxScore = 0;
+          const questionScores: InstructorResultQuestionScore[] = questions.map((q) => {
+            const { cell, earned } = scoreSubmission(latestByQuestion.get(q.questionId), q.points);
+            totalScore += earned;
+            maxScore += q.points;
+            return {
+              questionId: q.questionId,
+              title: q.title,
+              position: q.position,
+              points: q.points,
+              ...cell,
+            };
+          });
+
+          return {
+            studentId: enrollment.studentId,
+            studentName: enrollment.student.name,
+            studentEmail: enrollment.student.email,
+            sessionId: session?.id ?? null,
+            sessionStatus: session?.status ?? null,
+            startedAt: session?.startedAt?.toISOString() ?? null,
+            submittedAt: session?.submittedAt?.toISOString() ?? null,
+            totalScore,
+            maxScore,
+            scorePercent: maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : null,
+            questions: questionScores,
+          };
+        })
+        .sort((a, b) => a.studentName.localeCompare(b.studentName))
+    : [];
+
+  return {
+    assessmentId: assessment.id,
+    assessmentTitle: assessment.title,
+    questions,
+    students,
+  };
 }
 
 export async function reorderInstructorAssessmentQuestions(

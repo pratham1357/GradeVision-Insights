@@ -1,6 +1,7 @@
 import { createApp } from "./app.js";
 import { env } from "./env.js";
 import { disconnectDatabase } from "./services/database.js";
+import { closeEvaluationQueue } from "./services/evaluation-queue.js";
 import { logger } from "./utils/logger.js";
 
 const app = createApp();
@@ -18,6 +19,7 @@ async function shutdown(signal: string): Promise<void> {
 
   server.close(async (closeError) => {
     if (closeError) logger.error("Error while closing HTTP server", { error: closeError.message });
+    await closeEvaluationQueue();
     await disconnectDatabase();
     process.exit(closeError ? 1 : 0);
   });

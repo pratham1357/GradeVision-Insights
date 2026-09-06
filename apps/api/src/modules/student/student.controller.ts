@@ -2,11 +2,14 @@ import type { Request, Response } from "express";
 
 import { getAuthContext } from "../../middleware/index.js";
 import { pathParam, sendData } from "../../utils/http.js";
-import type { SaveDraftInput, SubmitInput } from "./student.schema.js";
+import type { RequestHintInput, SaveDraftInput, SubmitInput } from "./student.schema.js";
 import {
   finishSession,
   getEligibleAssessments,
+  getQuestionHints,
   getSession,
+  getSubmissionResult,
+  requestHint,
   saveDraft,
   startSession,
   submitCode,
@@ -56,6 +59,33 @@ export async function submitQuestion(req: Request, res: Response): Promise<void>
     pathParam(req, "sessionId"),
     pathParam(req, "questionId"),
     req.body as SubmitInput,
+    userId,
+  );
+  sendData(res, result, 201);
+}
+
+/** `GET /api/v1/student/submissions/:submissionId` - evaluation status & final result. */
+export async function getSubmissionResultView(req: Request, res: Response): Promise<void> {
+  const { userId } = getAuthContext(req);
+  sendData(res, await getSubmissionResult(pathParam(req, "submissionId"), userId));
+}
+
+/** `GET /api/v1/student/sessions/:sessionId/questions/:questionId/hints` - hint stages. */
+export async function listQuestionHints(req: Request, res: Response): Promise<void> {
+  const { userId } = getAuthContext(req);
+  sendData(
+    res,
+    await getQuestionHints(pathParam(req, "sessionId"), pathParam(req, "questionId"), userId),
+  );
+}
+
+/** `POST /api/v1/student/sessions/:sessionId/questions/:questionId/hints` - request a hint. */
+export async function requestQuestionHint(req: Request, res: Response): Promise<void> {
+  const { userId } = getAuthContext(req);
+  const result = await requestHint(
+    pathParam(req, "sessionId"),
+    pathParam(req, "questionId"),
+    req.body as RequestHintInput,
     userId,
   );
   sendData(res, result, 201);

@@ -5,11 +5,15 @@ with an explicit dependency direction and no hidden coupling.
 
 ```
 apps/web ──HTTP──▶ apps/api ──▶ @gradevision/database ──▶ Prisma ──▶ PostgreSQL
+                      │  │
+                      │  ├─ @gradevision/shared     (cross-app types/constants)
+                      │  ├─ @gradevision/queue       (BullMQ; optional Redis)
+                      │  └─ @gradevision/grading     (deterministic scoring)
                       │
-                      ├── @gradevision/shared        (cross-app types/constants)
+                      ├──HTTP──▶ services/hint-engine  ──▶ LLM provider (Gemini)
                       │
-   services/evaluator ┘  (separate service, called later — not wired yet)
-   services/hint-engine   (separate service, called later — not wired yet)
+   (queue / DB) ─────▶ services/evaluator ──▶ Judge0 sandbox
+                            └─ @gradevision/grading
 ```
 
 ## Frontend → API
@@ -274,7 +278,76 @@ excluded at the query level (`where: { visibility: "VISIBLE" }` + a narrow
   across a reload without adding infrastructure now, and the API surface will not
   change when Redis fronts or replaces it. `Submission` stays the immutable
   history (one row per submit, `attemptNumber` incrementing, `status = QUEUED`).
-  Evaluation is a **separate future task** - nothing runs the code.
+  A submit optionally enqueues a BullMQ job (`@gradevision/queue`); without Redis
+  it is a no-op and the evaluator's PostgreSQL poller picks the row up.
+
+## Automated evaluation pipeline
+
+`services/evaluator` consumes `QUEUED` submissions - from a BullMQ worker when
+`REDIS_URL` is set, otherwise by polling `submission.status = QUEUED`. Both paths
+call the same `evaluateSubmission(submissionId, deps)`:
+
+1. **Atomic claim.** `updateMany({ where: { id, status: QUEUED }, data: { status: RUNNING } })`
+   - only the caller whose update affected a row proceeds; a second worker or a
+     re-poll of a finished submission gets `{ status: "skipped" }`. A single
+     `EvaluationRun` (`@@unique([submissionId, runNumber])`, always `runNumber = 1`)
+     is upserted, so a submission can never accumulate multiple final scores
+     (**idempotent**).
+2. **Execute.** The submission, question, language, and **all** active test cases
+   (visible + hidden) are loaded and sent to the Judge0 sandbox. Judge0 is
+   abstracted behind `ExecutionProvider`; when `JUDGE0_URL` is unset the run is
+   marked `FAILED` with `EXECUTION_UNAVAILABLE` - it never silently passes.
+3. **Grade** (see below).
+4. **Persist.** `TestCaseResult` per case (status, output/error truncated,
+   time/memory), `CriterionScore` per rubric criterion, `EvaluationRun`
+   (`totalScore`, `maxScore`, `providerMetadata` with the semantic summary),
+   and `submission.status = COMPLETED` / `FAILED` - all in one transaction.
+
+Compile errors, runtime errors, timeouts, and evaluator faults each map to a
+distinct persisted status; nothing throws past the transaction.
+
+### Grading (`@gradevision/grading`)
+
+Pure, deterministic, dependency-free. `computeEvaluation` combines:
+
+- **Functional correctness** - behavioural: outputs are compared after
+  whitespace normalisation, so a correct alternative implementation with
+  different formatting still passes. Weighted per test case for partial credit.
+- **Rubric scoring** - one `CriterionScore` per `RubricCriterion`, driven by the
+  criterion's `config` JSON. Qualitative criteria (`ALGORITHMIC_APPROACH`,
+  `CODE_QUALITY`, ...) **start at `maxPoints x functionalRatio`** and only lose
+  points for named, concrete problems (a forbidden construct actually found, a
+  function over the configured length). A correct solution is never penalised
+  merely for differing from an expected algorithm. No rubric -> one implicit
+  100-point functional criterion.
+- **Semantic analysis** - `SemanticAnalyzer` interface; v1 is a Python `ast`
+  analyzer (`python3 -c <script>`, code is parsed, never executed). Any other
+  language returns `available: false` and grading falls back to functional
+  correctness, so the analyzer can never falsely penalise.
+
+### Progressive hints
+
+`services/hint-engine` is a backend-only process. `LLMProvider` interface;
+`GeminiProvider` reads `GEMINI_API_KEY` / `GEMINI_MODEL` / `GEMINI_BASE_URL`
+from the environment (nothing hard-coded) and calls the REST API with plain
+`fetch`. `POST /hints` returns guidance text; without a key it returns `503`
+`PROVIDER_NOT_CONFIGURED` - never a fabricated hint.
+
+The API (`/api/v1/student/sessions/:id/questions/:qid/hints`) owns progression:
+stage 1 or "previous stage used", plus the stage's `unlockDelaySeconds` elapsed
+since session start. `STATIC` stages return `HintStage.content`; `INTERACTIVE`
+stages forward the minimum context (title, statement, latest code, earlier
+hints) to the hint-engine. `HintUsage` (`@@unique([examSessionId, hintStageId])`)
+makes a repeat request idempotent.
+
+### Results
+
+- Student: `GET /api/v1/student/submissions/:id` (ownership: submission ->
+  session -> `studentId`). Hidden test cases return status + timing only - name,
+  input, expected and actual output are stripped.
+- Instructor: `GET /api/v1/assessments/:id/results` (ownership-scoped via
+  `ownedBy`). Per-student, per-question score summary + a gradebook total
+  (`question.points x rubricPercent`).
 
 ### Student frontend
 
@@ -289,17 +362,16 @@ authoring surface only - it never executes code.
 
 ## Service boundaries: evaluator & hint-engine
 
-`services/evaluator` (compiler-driven execution + grading) and
-`services/hint-engine` (progressive hints / AI mentor) stay **separate
-processes**. They are not imported by `apps/api` and there is no inter-service
-communication yet. When wired, the API will reach them over HTTP (and later a
-queue); each can scale independently. Judge0 is an execution detail that will live
-_inside_ the evaluator, not in the API or the database.
+`services/evaluator` (execution + grading) and `services/hint-engine`
+(progressive hints / AI mentor) are **separate processes**. The API never
+imports them: it reaches the hint-engine over HTTP and hands submissions to the
+evaluator via a queue (or the shared database). `@gradevision/grading` and
+`@gradevision/queue` are the only shared code. Judge0 lives _inside_ the
+evaluator, behind `ExecutionProvider` - never in the API or the database.
 
 ## Deferred (not in this codebase yet)
 
 User registration, password reset, email verification, refresh tokens, token
-revocation, OAuth / SSO; evaluation of submissions, Judge0 and code execution,
-AST/semantic analysis, results/scoring, proctoring enforcement, Socket.IO,
-AI/LLM integration, hint timers, Redis / live-session state, rate limiting,
-Helmet/CSRF, Kubernetes, and production deployment. Each is a separate task.
+revocation, OAuth / SSO; proctoring enforcement, Socket.IO / live monitoring,
+multi-attempt exams, rate limiting, Helmet/CSRF, Kubernetes, and production
+deployment. Each is a separate task.

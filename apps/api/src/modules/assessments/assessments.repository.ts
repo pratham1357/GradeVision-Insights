@@ -114,6 +114,49 @@ export function listAssessmentQuestionIds(assessmentId: string) {
   });
 }
 
+/**
+ * Everything the results view needs, in one ownership-scoped query: the ordered
+ * questions, the section's ACTIVE students, and each student's session with its
+ * submissions + evaluation runs.
+ */
+export function loadAssessmentResults(assessmentId: string, instructorId: string) {
+  return prisma.assessment.findFirst({
+    where: { id: assessmentId, ...ownedBy(instructorId) },
+    include: {
+      questions: {
+        orderBy: { position: "asc" },
+        include: { question: { select: { id: true, title: true } } },
+      },
+      section: {
+        include: {
+          enrollments: {
+            where: { status: "ACTIVE" },
+            include: { student: { select: { id: true, name: true, email: true } } },
+          },
+        },
+      },
+      examSessions: {
+        include: {
+          submissions: {
+            orderBy: { attemptNumber: "desc" },
+            include: {
+              evaluationRuns: {
+                where: { runNumber: 1 },
+                select: {
+                  status: true,
+                  totalScore: true,
+                  maxScore: true,
+                  testCaseResults: { select: { status: true } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
 export function reorderAssessmentQuestions(assessmentId: string, orderedQuestionIds: string[]) {
   return prisma.$transaction(
     orderedQuestionIds.map((questionId, index) =>

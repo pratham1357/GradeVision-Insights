@@ -44,7 +44,14 @@ jobs:
 
       # Library packages must be built before the apps can typecheck against them.
       - run: pnpm --filter @gradevision/database generate
-      - run: pnpm --filter @gradevision/shared --filter @gradevision/database build
+      - run: >-
+          pnpm --filter @gradevision/shared --filter @gradevision/database
+          --filter @gradevision/grading --filter @gradevision/queue build
+
+      # The Python AST semantic analyzer shells out to `python3`.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - run: pnpm typecheck
       - run: pnpm lint

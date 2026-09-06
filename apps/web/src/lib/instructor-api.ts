@@ -2,6 +2,7 @@ import type {
   AssessmentDetail,
   AssessmentStatus,
   AssessmentSummary,
+  InstructorAssessmentResults,
   InstructorCourse,
   ProgrammingLanguage,
   QuestionDetail,
@@ -71,6 +72,8 @@ export const instructorApi = {
 
   listAssessments: () => apiRequest<AssessmentSummary[]>("/assessments"),
   getAssessment: (id: string) => apiRequest<AssessmentDetail>(`/assessments/${id}`),
+  getAssessmentResults: (id: string) =>
+    apiRequest<InstructorAssessmentResults>(`/assessments/${id}/results`),
   createAssessment: (body: AssessmentInput) =>
     apiRequest<AssessmentDetail>("/assessments", { method: "POST", ...json(body) }),
   updateAssessment: (id: string, body: AssessmentUpdateInput) =>

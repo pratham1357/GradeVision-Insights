@@ -1,0 +1,105 @@
+# Local development infrastructure for GradeVision Insights.
+#
+#   docker compose -f infrastructure/docker/docker-compose.yml up -d
+#
+# Brings up:
+#   - postgres  : the application database (matches DATABASE_URL in .env)
+#   - redis     : optional BullMQ queue for the evaluator (REDIS_URL in .env)
+#   - judge0 + judge0-workers + judge0-db + judge0-redis : self-hosted sandbox
+#
+# Judge0 needs cgroup v1 / privileged workers. On Linux this generally works
+# out of the box; on Docker Desktop (macOS/Windows) you may need to enable
+# "Use cgroupfs" / disable cgroup v2, or run the whole stack in a Linux VM.
+# If Judge0 will not start, leave JUDGE0_URL unset - the evaluator then marks
+# runs FAILED with a clear "execution sandbox not configured" reason.
+
+name: gradevision
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gradevision
+      POSTGRES_PASSWORD: gradevision_dev_pw
+      POSTGRES_DB: gradevision
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gradevision"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --- Judge0 self-hosted code-execution sandbox --------------------------------
+  judge0-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: judge0_dev_pw
+      POSTGRES_DB: judge0
+    volumes:
+      - judge0-db-data:/var/lib/postgresql/data
+
+  judge0-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "no"]
+
+  judge0:
+    image: judge0/judge0:1.13.1
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "2358:2358"
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    environment:
+      REDIS_HOST: judge0-redis
+      POSTGRES_HOST: judge0-db
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: judge0_dev_pw
+    depends_on:
+      - judge0-db
+      - judge0-redis
+
+  judge0-workers:
+    image: judge0/judge0:1.13.1
+    restart: unless-stopped
+    privileged: true
+    command: ["./scripts/workers"]
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    environment:
+      REDIS_HOST: judge0-redis
+      POSTGRES_HOST: judge0-db
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: judge0_dev_pw
+    depends_on:
+      - judge0
+      - judge0-db
+      - judge0-redis
+
+volumes:
+  postgres-data:
+  redis-data:
+  judge0-db-data:

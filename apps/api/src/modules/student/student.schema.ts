@@ -15,6 +15,16 @@ export const sessionQuestionParamsSchema = z.object({
   questionId: z.uuid(),
 });
 
+export const submissionParamsSchema = z.object({
+  submissionId: z.uuid(),
+});
+
+export const requestHintSchema = z.object({
+  stageNumber: z.number().int().positive().max(20),
+});
+
+export type RequestHintInput = z.infer<typeof requestHintSchema>;
+
 const codePayload = z.object({
   language: z.enum(PROGRAMMING_LANGUAGES),
   // Generous cap; the editor is for solutions, not file uploads.

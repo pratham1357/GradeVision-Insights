@@ -6,6 +6,7 @@ import {
   createAssessment,
   deleteAssessmentQuestion,
   getAssessment,
+  getAssessmentResultsView,
   listAssessments,
   patchAssessmentQuestion,
   reorderAssessmentQuestions,
@@ -33,6 +34,11 @@ assessmentsRouter.get("/", listAssessments);
 assessmentsRouter.post("/", validateBody(createAssessmentSchema), createAssessment);
 
 assessmentsRouter.get("/:assessmentId", validateParams(assessmentParamsSchema), getAssessment);
+assessmentsRouter.get(
+  "/:assessmentId/results",
+  validateParams(assessmentParamsSchema),
+  getAssessmentResultsView,
+);
 assessmentsRouter.patch(
   "/:assessmentId",
   validateParams(assessmentParamsSchema),

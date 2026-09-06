@@ -71,6 +71,7 @@ export function DashboardPage() {
                 <th className="pb-2">Status</th>
                 <th className="pb-2 text-right">Questions</th>
                 <th className="pb-2 text-right">Points</th>
+                <th className="pb-2 text-right">Results</th>
               </tr>
             </thead>
             <tbody>
@@ -92,6 +93,14 @@ export function DashboardPage() {
                   </td>
                   <td className="py-2 text-right text-neutral-500">{a.questionCount}</td>
                   <td className="py-2 text-right text-neutral-500">{a.totalPoints}</td>
+                  <td className="py-2 text-right">
+                    <Link
+                      className="text-xs text-blue-700 hover:underline"
+                      to={`/assessments/${a.id}/results`}
+                    >
+                      Results
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>

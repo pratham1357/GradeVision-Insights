@@ -56,6 +56,10 @@ const ids = {
   testHidden2: "00000000-0000-4000-8000-000000000064",
   hintStage1: "00000000-0000-4000-8000-000000000071",
   hintStage2: "00000000-0000-4000-8000-000000000072",
+  hintStage3: "00000000-0000-4000-8000-000000000073",
+  hintStage4: "00000000-0000-4000-8000-000000000074",
+  q2HintStage1: "00000000-0000-4000-8000-000000000075",
+  q2HintStage2: "00000000-0000-4000-8000-000000000076",
 } as const;
 
 async function main(): Promise<void> {
@@ -247,6 +251,8 @@ async function main(): Promise<void> {
     type: RubricCriterionType;
     maxPoints: number;
     position: number;
+    // Machine-readable grading config the evaluator's rubric engine reads.
+    config: Record<string, unknown>;
   }[] = [
     {
       id: ids.criterionFunctional,
@@ -255,6 +261,7 @@ async function main(): Promise<void> {
       type: RubricCriterionType.FUNCTIONAL_CORRECTNESS,
       maxPoints: 70,
       position: 0,
+      config: {},
     },
     {
       id: ids.criterionApproach,
@@ -263,6 +270,8 @@ async function main(): Promise<void> {
       type: RubricCriterionType.ALGORITHMIC_APPROACH,
       maxPoints: 20,
       position: 1,
+      // Any correct approach earns full credit; only these constructs are penalised.
+      config: { forbidden: ["eval", "exec"], mode: "lenient" },
     },
     {
       id: ids.criterionQuality,
@@ -271,6 +280,7 @@ async function main(): Promise<void> {
       type: RubricCriterionType.CODE_QUALITY,
       maxPoints: 10,
       position: 2,
+      config: { maxFunctionLength: 40, maxNestingDepth: 4 },
     },
   ];
 
@@ -283,6 +293,7 @@ async function main(): Promise<void> {
         type: criterion.type,
         maxPoints: criterion.maxPoints,
         position: criterion.position,
+        config: criterion.config,
       },
       create: { rubricId: rubric.id, ...criterion },
     });
@@ -395,34 +406,98 @@ async function main(): Promise<void> {
     });
   }
 
-  await prisma.hintStage.upsert({
-    where: { questionId_stageNumber: { questionId: question.id, stageNumber: 1 } },
-    update: {},
-    create: {
+  // Progressive hints: three static stages that escalate, then an interactive
+  // (AI mentor) stage. The interactive stage needs the hint-engine + a provider
+  // key; without one the API returns a clear 503 rather than a fake hint.
+  const hintStages: {
+    id: string;
+    questionId: string;
+    stageNumber: number;
+    title: string;
+    description: string;
+    deliveryType: HintDeliveryType;
+    unlockDelaySeconds: number;
+    content: string | null;
+  }[] = [
+    {
       id: ids.hintStage1,
       questionId: question.id,
       stageNumber: 1,
-      title: "Getting started",
-      description: "Nudge toward reading input correctly.",
+      title: "Conceptual nudge",
+      description: "Points at the shape of the problem.",
       deliveryType: HintDeliveryType.STATIC,
       unlockDelaySeconds: 0,
-      content: "Both integers are on one line - split the line before converting.",
+      content: "This is just input parsing plus one arithmetic operation - nothing more.",
     },
-  });
-
-  await prisma.hintStage.upsert({
-    where: { questionId_stageNumber: { questionId: question.id, stageNumber: 2 } },
-    update: {},
-    create: {
+    {
       id: ids.hintStage2,
       questionId: question.id,
       stageNumber: 2,
-      title: "Interactive mentor",
-      description: "Opens the AI mentor chat after a waiting period.",
-      deliveryType: HintDeliveryType.INTERACTIVE,
-      unlockDelaySeconds: 600,
+      title: "Specific direction",
+      description: "Names the technique.",
+      deliveryType: HintDeliveryType.STATIC,
+      unlockDelaySeconds: 30,
+      content: "Both integers are on one line - split the line, then convert each piece to an int.",
     },
-  });
+    {
+      id: ids.hintStage3,
+      questionId: question.id,
+      stageNumber: 3,
+      title: "Approach & debugging",
+      description: "Walks through the steps and common mistakes.",
+      deliveryType: HintDeliveryType.STATIC,
+      unlockDelaySeconds: 90,
+      content:
+        "Steps: read one line, split on whitespace, map to int, sum, print. If you get a type error you probably added strings; if the count is wrong, check your split.",
+    },
+    {
+      id: ids.hintStage4,
+      questionId: question.id,
+      stageNumber: 4,
+      title: "Interactive mentor",
+      description: "Opens the AI mentor, which responds to your current code.",
+      deliveryType: HintDeliveryType.INTERACTIVE,
+      unlockDelaySeconds: 150,
+      content: null,
+    },
+    {
+      id: ids.q2HintStage1,
+      questionId: question2.id,
+      stageNumber: 1,
+      title: "Conceptual nudge",
+      description: "Points at the shape of the problem.",
+      deliveryType: HintDeliveryType.STATIC,
+      unlockDelaySeconds: 0,
+      content: "You are building one output string from one input string - watch the exact format.",
+    },
+    {
+      id: ids.q2HintStage2,
+      questionId: question2.id,
+      stageNumber: 2,
+      title: "Specific direction",
+      description: "Names the technique.",
+      deliveryType: HintDeliveryType.STATIC,
+      unlockDelaySeconds: 30,
+      content:
+        "Strip the trailing newline from the input, then interpolate it into `Hello, <name>!`.",
+    },
+  ];
+
+  for (const stage of hintStages) {
+    await prisma.hintStage.upsert({
+      where: {
+        questionId_stageNumber: { questionId: stage.questionId, stageNumber: stage.stageNumber },
+      },
+      update: {
+        title: stage.title,
+        description: stage.description,
+        deliveryType: stage.deliveryType,
+        unlockDelaySeconds: stage.unlockDelaySeconds,
+        content: stage.content,
+      },
+      create: stage,
+    });
+  }
 
   console.log("Seed complete:", {
     users: [instructor.email, student1.email, student2.email],

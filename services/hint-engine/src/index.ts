@@ -1,28 +1,25 @@
-import { createServer } from "node:http";
+import { createHintEngineServer, createProvider } from "./app.js";
+import { env } from "./env.js";
+import { logger } from "./logger.js";
 
-import { healthStatus } from "@gradevision/shared";
+const provider = createProvider();
+const server = createHintEngineServer(provider);
 
-const SERVICE_NAME = "hint-engine";
-const port = Number(process.env.HINT_ENGINE_PORT ?? 4200);
-
-// Scaffold entry point. LLM provider abstraction is added in later tasks.
-const server = createServer((req, res) => {
-  if (req.method === "GET" && req.url === "/health") {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(healthStatus(SERVICE_NAME)));
-    return;
+server.listen(env.port, () => {
+  logger.info(`hint-engine listening on http://0.0.0.0:${env.port}`, {
+    env: env.NODE_ENV,
+    provider: provider.name,
+    configured: provider.isConfigured(),
+  });
+  if (!provider.isConfigured()) {
+    logger.warn("no LLM provider configured - dynamic hint requests will return 503");
   }
-  res.writeHead(404, { "content-type": "application/json" });
-  res.end(JSON.stringify({ error: "not_found" }));
-});
-
-server.listen(port, () => {
-  console.log(`[${SERVICE_NAME}] listening on http://0.0.0.0:${port}`);
 });
 
 function shutdown(signal: string): void {
-  console.log(`[${SERVICE_NAME}] received ${signal}, shutting down`);
+  logger.info(`received ${signal}, shutting down`);
   server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 5_000).unref();
 }
 
 process.on("SIGINT", () => shutdown("SIGINT"));

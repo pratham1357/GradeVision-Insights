@@ -1,6 +1,7 @@
 import type { ExamSessionStatus, Prisma, ProgrammingLanguage } from "@gradevision/database";
 
 import { prisma } from "../../services/database.js";
+import { runWithResultsArgs } from "../results/mapper.js";
 
 /**
  * An assessment is available to a student when it is ACTIVE, the student has an
@@ -132,9 +133,110 @@ export function loadSessionView(sessionId: string) {
           status: true,
           attemptNumber: true,
           createdAt: true,
+          evaluationRuns: {
+            where: { runNumber: 1 },
+            select: {
+              status: true,
+              totalScore: true,
+              maxScore: true,
+              testCaseResults: { select: { status: true } },
+            },
+          },
         },
       },
     },
+  });
+}
+
+/** Full evaluation detail for one submission, scoped to its owning student (else null). */
+export function findSubmissionResultForStudent(submissionId: string, studentId: string) {
+  return prisma.submission.findFirst({
+    where: { id: submissionId, examSession: { studentId } },
+    include: {
+      question: { select: { title: true } },
+      evaluationRuns: { where: { runNumber: 1 }, ...runWithResultsArgs },
+    },
+  });
+}
+
+// --- Hints ------------------------------------------------------------------
+
+/** Active hint stages for a question, ascending, plus this session's usage rows. */
+export function loadQuestionHints(questionId: string, examSessionId: string) {
+  return prisma.hintStage.findMany({
+    where: { questionId, isActive: true },
+    orderBy: { stageNumber: "asc" },
+    include: {
+      usages: {
+        where: { examSessionId },
+        select: {
+          status: true,
+          requestedAt: true,
+          consumedAt: true,
+          detail: true,
+        },
+      },
+    },
+  });
+}
+
+export function findQuestionForHintContext(questionId: string) {
+  return prisma.question.findUnique({
+    where: { id: questionId },
+    select: { title: true, statement: true },
+  });
+}
+
+export function findHintStage(questionId: string, stageNumber: number) {
+  return prisma.hintStage.findFirst({
+    where: { questionId, stageNumber, isActive: true },
+  });
+}
+
+export function findHintUsage(examSessionId: string, hintStageId: string) {
+  return prisma.hintUsage.findUnique({
+    where: { examSessionId_hintStageId: { examSessionId, hintStageId } },
+  });
+}
+
+export function createHintUsage(data: {
+  hintStageId: string;
+  examSessionId: string;
+  studentId: string;
+  questionId: string;
+  status: "REQUESTED" | "UNLOCKED" | "CONSUMED";
+  detail?: Prisma.InputJsonValue;
+}) {
+  return prisma.hintUsage.create({
+    data: {
+      hintStageId: data.hintStageId,
+      examSessionId: data.examSessionId,
+      studentId: data.studentId,
+      questionId: data.questionId,
+      status: data.status,
+      unlockedAt: data.status === "REQUESTED" ? null : new Date(),
+      consumedAt: data.status === "CONSUMED" ? new Date() : null,
+      ...(data.detail !== undefined ? { detail: data.detail } : {}),
+    },
+  });
+}
+
+export function markHintUsageConsumed(id: string, detail?: Prisma.InputJsonValue) {
+  return prisma.hintUsage.update({
+    where: { id },
+    data: {
+      status: "CONSUMED",
+      consumedAt: new Date(),
+      ...(detail !== undefined ? { detail } : {}),
+    },
+  });
+}
+
+export function latestSubmissionCode(examSessionId: string, questionId: string) {
+  return prisma.submission.findFirst({
+    where: { examSessionId, questionId },
+    orderBy: { attemptNumber: "desc" },
+    select: { sourceCode: true, language: true },
   });
 }
 
