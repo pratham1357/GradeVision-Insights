@@ -4,13 +4,17 @@ import type {
   AssessmentSummary,
   EvaluationRunStatus,
   InstructorAssessmentResults,
+  InstructorAssessmentStats,
   InstructorResultQuestionScore,
   InstructorResultRow,
+  InstructorSessionResult,
 } from "@gradevision/shared";
 
 import { ApiError } from "../../utils/api-error.js";
 import { findInstructorSection } from "../courses/courses.repository.js";
+import { violationCountsBySession } from "../integrity/integrity.repository.js";
 import { findOwnedQuestionMeta } from "../questions/questions.repository.js";
+import { toEvaluationDetail } from "../results/mapper.js";
 import {
   attachQuestion,
   createAssessment,
@@ -21,6 +25,7 @@ import {
   listAssessmentQuestionIds,
   listInstructorAssessments,
   loadAssessmentResults,
+  loadAssessmentSessionResult,
   nextQuestionPosition,
   reorderAssessmentQuestions,
   updateAssessment,
@@ -277,6 +282,11 @@ export async function getAssessmentResults(
     sessionByStudent.set(session.studentId, session);
   }
 
+  const violationCounts = new Map<string, number>();
+  for (const row of await violationCountsBySession(assessment.examSessions.map((s) => s.id))) {
+    violationCounts.set(row.examSessionId, row._count._all);
+  }
+
   const students: InstructorResultRow[] = assessment.section
     ? assessment.section.enrollments
         .map((enrollment) => {
@@ -314,6 +324,7 @@ export async function getAssessmentResults(
             totalScore,
             maxScore,
             scorePercent: maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : null,
+            violationCount: session ? (violationCounts.get(session.id) ?? 0) : 0,
             questions: questionScores,
           };
         })
@@ -324,7 +335,93 @@ export async function getAssessmentResults(
     assessmentId: assessment.id,
     assessmentTitle: assessment.title,
     questions,
+    stats: computeStats(students),
     students,
+  };
+}
+
+function computeStats(rows: InstructorResultRow[]): InstructorAssessmentStats {
+  const started = rows.filter((r) => r.sessionId !== null);
+  const submitted = started.filter(
+    (r) => r.sessionStatus === "SUBMITTED" || r.sessionStatus === "EXPIRED",
+  );
+  const inProgress = started.filter((r) => r.sessionStatus === "IN_PROGRESS");
+  // "graded" = at least one question has a COMPLETED evaluation run.
+  const graded = started.filter((r) => r.questions.some((q) => q.evaluationStatus === "COMPLETED"));
+  const percents = graded.map((r) => r.scorePercent).filter((p): p is number => p !== null);
+  const round = (n: number) => Math.round(n);
+  return {
+    totalStudents: rows.length,
+    startedCount: started.length,
+    submittedCount: submitted.length,
+    inProgressCount: inProgress.length,
+    gradedCount: graded.length,
+    averageScorePercent: percents.length
+      ? round(percents.reduce((a, b) => a + b, 0) / percents.length)
+      : null,
+    highestScorePercent: percents.length ? Math.max(...percents) : null,
+    lowestScorePercent: percents.length ? Math.min(...percents) : null,
+    totalViolations: rows.reduce((sum, r) => sum + r.violationCount, 0),
+    studentsWithViolations: rows.filter((r) => r.violationCount > 0).length,
+  };
+}
+
+// --- Per-session breakdown (instructor) ----------------------------------
+
+export async function getAssessmentSessionResult(
+  assessmentId: string,
+  sessionId: string,
+  instructorId: string,
+): Promise<InstructorSessionResult> {
+  const session = await loadAssessmentSessionResult(assessmentId, sessionId, instructorId);
+  if (!session) {
+    throw ApiError.notFound("Exam session not found");
+  }
+
+  const latestByQuestion = new Map<string, (typeof session.submissions)[number]>();
+  for (const submission of session.submissions) {
+    if (!latestByQuestion.has(submission.questionId)) {
+      latestByQuestion.set(submission.questionId, submission);
+    }
+  }
+
+  let totalScore = 0;
+  let maxScore = 0;
+  const questions = session.assessment.questions.map((link) => {
+    const points = Number(link.points);
+    const submission = latestByQuestion.get(link.questionId);
+    const run = submission?.evaluationRuns[0] ?? null;
+    const detail = toEvaluationDetail(run);
+    const pct = detail?.scorePercent ?? null;
+    totalScore += pct === null ? 0 : Math.round((points * pct) / 100);
+    maxScore += points;
+    return {
+      questionId: link.questionId,
+      title: link.question.title,
+      position: link.position,
+      points,
+      submissionId: submission?.id ?? null,
+      attemptNumber: submission?.attemptNumber ?? null,
+      submissionStatus: submission?.status ?? null,
+      // `toEvaluationDetail` redacts hidden test-case input/expected/actual output.
+      evaluation: detail,
+    };
+  });
+
+  return {
+    sessionId: session.id,
+    assessmentId,
+    studentId: session.student.id,
+    studentName: session.student.name,
+    studentEmail: session.student.email,
+    sessionStatus: session.status,
+    startedAt: session.startedAt?.toISOString() ?? null,
+    submittedAt: session.submittedAt?.toISOString() ?? null,
+    totalScore,
+    maxScore,
+    scorePercent: maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : null,
+    violationCount: session._count.violations,
+    questions,
   };
 }
 

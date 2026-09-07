@@ -145,11 +145,15 @@ pnpm test        # vitest (apps/api)
 
 `pnpm test` has two kinds of suites:
 
-- `auth` / `jwt` / `password` — mock the repository, no database.
-- `instructor` / `student` — real integration tests. They need PostgreSQL running
+- `auth` / `jwt` / `password` / `realtime/watcher` / `realtime/io` — mocked or
+  pure-logic, no database.
+- `instructor` / `student` / `results-hints` / `integrity` / `realtime/io.integration`
+  / evaluator `evaluate` — real integration tests. They need PostgreSQL running
   and the schema migrated (`DATABASE_URL`, the seeded dev DB locally). Each
-  creates its own fixtures under fixed `ffffffff-…` / `eeeeeeee-…` ids and removes
-  them before and after, so seed data is never touched.
+  creates its own fixtures under a fixed id prefix (`ffffffff-…`, `eeeeeeee-…`,
+  `dddddddd-…`, `cccccccc-…`, `bbbbbbbb-…`, `aaaaaaaa-…`) and removes them before
+  and after, so seed data is never touched. Judge0 is never required — the
+  evaluator suite uses a mock `ExecutionProvider`.
 
 ## Instructor workflow (manual check)
 
@@ -204,12 +208,45 @@ pnpm --filter @gradevision/hint-engine dev   # -> http://localhost:4200/health
 ```
 
 - **No Judge0?** Everything else still works; automated runs are persisted as
-  `FAILED` with `EXECUTION_UNAVAILABLE`. Judge0 needs privileged containers /
-  cgroup v1 — on Docker Desktop it may not start; that is expected locally.
+  `FAILED` with `EXECUTION_UNAVAILABLE`. Judge0 1.13.1 needs privileged
+  containers + cgroup v1 with swap accounting — **on Docker Desktop
+  (Windows/macOS) the workers will not start**. Run `... up -d postgres redis`
+  only, or run the full stack inside a Linux VM / WSL2 with cgroup v1, or point
+  `JUDGE0_URL` at a separately hosted Judge0. See the header of
+  `infrastructure/docker/docker-compose.yml`.
 - **The Python AST analyzer** shells out to `PYTHON_BIN` (`python3` by default).
   Set it to `python` on Windows if `python3` is not on PATH, or empty to disable.
-- **Instructor results:** as `instructor@example.edu`, open the ACTIVE
-  assessment → **View results** for the per-student / per-question table.
+- **Realtime is optional too.** The API attaches Socket.IO at `/realtime` on the
+  same port; the web clients use it for "re-fetch now" signals. If it is
+  unavailable the exam page and results dashboard fall back to interval polling
+  automatically - a small "Live / Offline" dot in the exam header shows which.
+
+## Review-2 demo (seeded data, ~3 minutes)
+
+Two terminals: `pnpm --filter @gradevision/api dev` and
+`pnpm --filter @gradevision/web dev`. Optionally a third for
+`pnpm --filter @gradevision/evaluator dev` (with `JUDGE0_URL` set) — without it
+the run finishes as a clean `FAILED` and the flow still demos end to end.
+
+1. **Instructor** — sign in as `instructor@example.edu` / `instructor-dev-password`.
+   Open **CS101 - Live Coding Assessment** → **Results** (the monitoring
+   dashboard: stat tiles, per-student rows, integrity column). Leave it open.
+2. **Student** — another browser/profile, `student1@example.edu` /
+   `student-dev-password`. `/student` → **Start assessment**.
+3. Solve **Sum of Two Integers** in Python
+   (`a, b = map(int, input().split()); print(a + b)`) → **Submit this question**.
+4. Watch the status badge move `Queued → Evaluating → Scored X/Y` (live via the
+   socket; polling if it is offline). Expand **Result** for the test summary,
+   rubric breakdown and feedback — hidden test cases show status only.
+5. Back in the **instructor** dashboard: the row updates live. Click it for the
+   per-question breakdown (hidden test data still redacted).
+6. **Trigger a violation** — in the student tab, press <kbd>Esc</kbd> to leave
+   fullscreen, or switch to another tab and back. A warning banner appears and
+   the count increments.
+7. In the instructor dashboard the **Flags** column ticks up; click the row →
+   **Integrity events** lists the recorded `FULLSCREEN_EXIT` / `WINDOW_BLUR`
+   with timestamps.
+8. Student → **Finish exam**.
 
 ## 7. Conventions
 
@@ -231,6 +268,7 @@ pnpm --filter @gradevision/hint-engine dev   # -> http://localhost:4200/health
 
 ## Not set up yet (planned)
 
-WebSockets / live monitoring, user registration, password reset, refresh tokens,
-SSO, proctoring enforcement, multi-attempt exams, and Kubernetes runtime. Do not
+User registration, password reset, refresh tokens, SSO, enforced proctoring
+(lockdown / hard blocks), camera/mic invigilation, multi-attempt exams, and
+Kubernetes runtime. Do not
 add these without an explicit task.

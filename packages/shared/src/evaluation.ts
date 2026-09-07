@@ -119,7 +119,23 @@ export interface InstructorResultRow {
   totalScore: number;
   maxScore: number;
   scorePercent: number | null;
+  /** Count of recorded integrity violations for this student's session. */
+  violationCount: number;
   questions: InstructorResultQuestionScore[];
+}
+
+/** Assessment-level aggregates. Numbers are `null` when there is no data yet. */
+export interface InstructorAssessmentStats {
+  totalStudents: number;
+  startedCount: number;
+  submittedCount: number;
+  inProgressCount: number;
+  gradedCount: number;
+  averageScorePercent: number | null;
+  highestScorePercent: number | null;
+  lowestScorePercent: number | null;
+  totalViolations: number;
+  studentsWithViolations: number;
 }
 
 /** `GET /api/v1/assessments/:assessmentId/results`. */
@@ -127,5 +143,36 @@ export interface InstructorAssessmentResults {
   assessmentId: string;
   assessmentTitle: string;
   questions: { questionId: string; title: string; position: number; points: number }[];
+  stats: InstructorAssessmentStats;
   students: InstructorResultRow[];
+}
+
+/**
+ * `GET /api/v1/assessments/:assessmentId/sessions/:sessionId/result` - one
+ * student's full per-question breakdown. Hidden test-case input/expected/actual
+ * output stay redacted even for the instructor.
+ */
+export interface InstructorSessionResult {
+  sessionId: string;
+  assessmentId: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  sessionStatus: ExamSessionStatus;
+  startedAt: string | null;
+  submittedAt: string | null;
+  totalScore: number;
+  maxScore: number;
+  scorePercent: number | null;
+  violationCount: number;
+  questions: {
+    questionId: string;
+    title: string;
+    position: number;
+    points: number;
+    submissionId: string | null;
+    attemptNumber: number | null;
+    submissionStatus: SubmissionStatus | null;
+    evaluation: SubmissionEvaluationDetail | null;
+  }[];
 }

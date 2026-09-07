@@ -55,6 +55,11 @@ export class Judge0Provider implements ExecutionProvider {
 
   async execute(request: ExecutionRequest): Promise<ExecutionResult> {
     const languageId = this.config.languageIds[request.language];
+    if (!languageId || !Number.isFinite(languageId)) {
+      // Misconfigured JUDGE0_LANG_* for this language - fail the run cleanly
+      // rather than sending Judge0 an undefined language id.
+      throw new Error(`No Judge0 language id configured for ${request.language}`);
+    }
     const cpuTime = Math.max(1, Math.ceil((request.limits.cpuTimeMs ?? 2000) / 1000));
     const wallTime = cpuTime + 3;
     const memoryKb = Math.max(16_384, (request.limits.memoryMb ?? 256) * 1024);

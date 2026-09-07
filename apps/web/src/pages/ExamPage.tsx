@@ -6,6 +6,7 @@ import type {
   SessionTiming,
   SubmissionEvaluationSummary,
   SubmissionResultView,
+  ViolationType,
 } from "@gradevision/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -15,12 +16,15 @@ import { CodeEditor } from "../components/CodeEditor";
 import { Alert, Badge, Button, Card, Spinner } from "../components/ui";
 import { ApiClientError } from "../lib/api-client";
 import { languageLabel } from "../lib/monaco";
+import { connectRealtime } from "../lib/realtime";
 import { studentApi } from "../lib/student-api";
+import { requestExamFullscreen, useIntegrityMonitor } from "../lib/use-integrity-monitor";
 import { messageFromError, useApi } from "../lib/use-api";
 
 const AUTOSAVE_DELAY_MS = 1500;
 const REFRESH_INTERVAL_MS = 20_000;
 const EVALUATION_POLL_MS = 4_000;
+const LIVE_SAFETY_REFRESH_MS = 45_000;
 
 const PENDING_EVAL_STATUSES = new Set(["PENDING", "RUNNING"]);
 
@@ -118,6 +122,7 @@ function ExamRunner({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [finishing, setFinishing] = useState(false);
+  const [socketLive, setSocketLive] = useState(false);
   const [, forceTick] = useState(0);
 
   const questions = view.questions;
@@ -149,21 +154,54 @@ function ExamRunner({
     if (timeUp && !locked) void refresh();
   }, [timeUp, locked, refresh]);
 
-  // Periodic re-sync of timing / submissions (never touches the editor).
+  // Live updates over Socket.IO. The REST view stays the source of truth - the
+  // socket only tells us when to re-fetch. `onStatus(false)` -> polling resumes.
   useEffect(() => {
-    if (locked) return;
-    const id = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(id);
-  }, [locked, refresh]);
+    return connectRealtime(
+      { sessionId },
+      {
+        onStatus: setSocketLive,
+        onSessionChanged: () => void refresh(),
+        onViolation: (violationCount) =>
+          setView((v) => ({ ...v, integrity: { ...v.integrity, violationCount } })),
+      },
+    );
+  }, [sessionId, refresh]);
 
-  // While any submission is still being evaluated, poll quickly (even after the
-  // session locks - a run can finish after time is up).
+  // Re-sync loop. Fast polling only when the socket is down; a slow safety net
+  // otherwise so a missed event still self-heals.
   const evaluationPending = questions.some(isEvaluationPending);
   useEffect(() => {
-    if (!evaluationPending) return;
-    const id = window.setInterval(() => void refresh(), EVALUATION_POLL_MS);
+    if (locked && !evaluationPending) return;
+    const interval = socketLive
+      ? LIVE_SAFETY_REFRESH_MS
+      : evaluationPending
+        ? EVALUATION_POLL_MS
+        : REFRESH_INTERVAL_MS;
+    const id = window.setInterval(() => void refresh(), interval);
     return () => window.clearInterval(id);
-  }, [evaluationPending, refresh]);
+  }, [locked, socketLive, evaluationPending, refresh]);
+
+  // Non-invasive integrity monitor: focus + fullscreen only.
+  const reportViolation = useCallback(
+    async (type: ViolationType, note?: string) => {
+      try {
+        const result = await studentApi.recordViolation(sessionId, { type, note });
+        setView((v) => ({
+          ...v,
+          integrity: {
+            violationCount: result.violationCount,
+            lastViolationAt: new Date().toISOString(),
+            warning: result.warning,
+          },
+        }));
+      } catch {
+        /* integrity signalling is best-effort - never disrupt the exam */
+      }
+    },
+    [sessionId],
+  );
+  useIntegrityMonitor(!locked, reportViolation);
 
   const persistDraft = useCallback(
     async (questionId: string, state: EditorState) => {
@@ -273,7 +311,13 @@ function ExamRunner({
           <h1 className="text-lg font-semibold">{view.assessmentTitle}</h1>
         </div>
         <div className="flex items-center gap-3">
+          <LiveDot connected={socketLive} />
           <Timer remaining={remaining} locked={locked} />
+          {!locked ? (
+            <Button variant="secondary" onClick={() => void requestExamFullscreen()}>
+              Fullscreen
+            </Button>
+          ) : null}
           <Button
             variant="secondary"
             disabled={finishing}
@@ -293,6 +337,12 @@ function ExamRunner({
           {view.timing.status === "EXPIRED"
             ? "Time is up. Your saved work is preserved; no more changes can be made."
             : `This session is ${view.timing.status}.`}
+        </Alert>
+      ) : null}
+
+      {view.integrity.warning ? (
+        <Alert kind={view.integrity.violationCount >= 3 ? "error" : "info"}>
+          {view.integrity.warning}
         </Alert>
       ) : null}
 
@@ -369,6 +419,26 @@ function ExamRunner({
 }
 
 // ---------------------------------------------------------------------------
+
+function LiveDot({ connected }: { connected: boolean }) {
+  return (
+    <span
+      className="flex items-center gap-1 text-xs text-neutral-400"
+      title={
+        connected
+          ? "Live updates connected"
+          : "Live updates unavailable - falling back to periodic refresh"
+      }
+    >
+      <span
+        className={`inline-block h-2 w-2 rounded-full ${
+          connected ? "bg-green-500" : "bg-neutral-300"
+        }`}
+      />
+      {connected ? "Live" : "Offline"}
+    </span>
+  );
+}
 
 function Timer({ remaining, locked }: { remaining: number | null; locked: boolean }) {
   if (remaining === null) {

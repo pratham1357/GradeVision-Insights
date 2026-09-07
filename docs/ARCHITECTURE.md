@@ -5,16 +5,19 @@ with an explicit dependency direction and no hidden coupling.
 
 ```
 apps/web ──HTTP──▶ apps/api ──▶ @gradevision/database ──▶ Prisma ──▶ PostgreSQL
-                      │  │
-                      │  ├─ @gradevision/shared     (cross-app types/constants)
-                      │  ├─ @gradevision/queue       (BullMQ; optional Redis)
-                      │  └─ @gradevision/grading     (deterministic scoring)
-                      │
-                      ├──HTTP──▶ services/hint-engine  ──▶ LLM provider (Gemini)
-                      │
-   (queue / DB) ─────▶ services/evaluator ──▶ Judge0 sandbox
-                            └─ @gradevision/grading
+        └─ws─┘        │  │
+                     │  ├─ @gradevision/shared     (cross-app types/constants)
+                     │  ├─ @gradevision/queue       (BullMQ; optional Redis)
+                     │  └─ @gradevision/grading     (deterministic scoring)
+                     │
+                     ├──HTTP──▶ services/hint-engine  ──▶ LLM provider (Gemini)
+                     │
+  (queue / DB) ─────▶ services/evaluator ──▶ Judge0 sandbox
+                           └─ @gradevision/grading
 ```
+
+`apps/web ─ws─ apps/api` is Socket.IO at `/realtime` for live "re-fetch" signals;
+it is optional and the client falls back to polling.
 
 ## Frontend → API
 
@@ -54,10 +57,13 @@ utils/       ApiError, response helpers, logger
 ```
 
 `modules/health`, `modules/auth`, `modules/courses`, `modules/assessments`,
-`modules/questions`, and `modules/student` are implemented (routes → controller →
-service → repository). `courses` / `assessments` / `questions` are the instructor
-authoring slice; `student` is the student assessment-taking slice (both below).
-`modules/users` is still a route boundary only.
+`modules/questions`, `modules/student`, `modules/integrity`, and
+`modules/results` (a shared `mapper.ts`, no router) are implemented (routes →
+controller → service → repository). `courses` / `assessments` / `questions` are
+the instructor authoring slice; `student` is the student assessment-taking
+slice; `integrity` is assessment integrity (below). `realtime/` (outside
+`modules/`) is the Socket.IO layer. `modules/users` is still a route boundary
+only.
 
 ### Request lifecycle
 
@@ -346,8 +352,48 @@ makes a repeat request idempotent.
   session -> `studentId`). Hidden test cases return status + timing only - name,
   input, expected and actual output are stripped.
 - Instructor: `GET /api/v1/assessments/:id/results` (ownership-scoped via
-  `ownedBy`). Per-student, per-question score summary + a gradebook total
-  (`question.points x rubricPercent`).
+  `ownedBy`). Per-student, per-question score summary, assessment-level
+  aggregates (`stats`: average / high / low score, started / submitted / graded
+  counts, integrity totals), and a gradebook total (`question.points x
+rubricPercent`). `GET .../sessions/:sessionId/result` drills into one student
+  - the same `toEvaluationDetail` mapper, so **hidden test input/expected/actual
+    output stay redacted even for the instructor**.
+
+## Assessment integrity
+
+Lightweight and non-invasive: the browser reports only page-focus and
+fullscreen state (`visibilitychange`, `blur`, `fullscreenchange`) - no camera,
+microphone, screen capture, or keystroke logging. `useIntegrityMonitor`
+debounces the burst a single tab-switch fires and `POST`s to
+`/api/v1/student/sessions/:id/violations` (STUDENT, session-owner, `IN_PROGRESS`
+only). Each call writes a `Violation` row (severity by type) plus an
+`integrity.violation` `AuditEvent`, and pushes `session:violation` +
+`assessment:changed` over the socket.
+
+The student sees an escalating banner and a count (`ExamSessionView.integrity`);
+internal rule ids / thresholds are never exposed. The instructor sees counts on
+the results dashboard and the full list at
+`GET /api/v1/assessments/:id/sessions/:sessionId/violations` (ownership-scoped).
+
+## Realtime (`apps/api/src/realtime`)
+
+Socket.IO is attached to the same HTTP server at `/realtime` (only in
+`server.ts`; `createApp()` stays pure Express, so tests are unaffected). It is a
+**pure enhancement over REST** - it carries only "something changed, re-fetch"
+signals, never data.
+
+- **Auth**: the handshake carries the same access token as REST
+  (`authenticateSocket`). Every room join is ownership-checked - a student may
+  only join `session:<own-session>`, an instructor only `assessment:<owned>`.
+- **Change detection**: the API cannot see the evaluator's DB writes, so
+  `RealtimeWatcher` polls the newest `EvaluationRun` / `Violation` timestamp per
+  _subscribed_ scope (only while someone is connected) and emits
+  `session:changed` / `assessment:changed`. Direct actions (`submitCode`,
+  `recordViolation`) emit immediately.
+- **Fallback**: the exam page and results dashboard keep their interval polling
+  and simply slow it down while the socket is connected (`onStatus`). A dropped
+  socket resumes fast polling. No second state store - the socket handler just
+  calls the same `refresh()` / `reload()`.
 
 ### Student frontend
 
@@ -372,6 +418,6 @@ evaluator, behind `ExecutionProvider` - never in the API or the database.
 ## Deferred (not in this codebase yet)
 
 User registration, password reset, email verification, refresh tokens, token
-revocation, OAuth / SSO; proctoring enforcement, Socket.IO / live monitoring,
-multi-attempt exams, rate limiting, Helmet/CSRF, Kubernetes, and production
-deployment. Each is a separate task.
+revocation, OAuth / SSO; enforced proctoring (lockdown browser, hard blocks),
+camera/mic invigilation, multi-attempt exams, rate limiting, Helmet/CSRF,
+Kubernetes, and production deployment. Each is a separate task.

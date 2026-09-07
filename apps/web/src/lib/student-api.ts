@@ -3,6 +3,8 @@ import type {
   HintRequestResult,
   ProgrammingLanguage,
   QuestionHintsView,
+  RecordViolationBody,
+  RecordViolationResult,
   SaveDraftResult,
   StudentAssessmentSummary,
   SubmissionResultView,
@@ -56,5 +58,11 @@ export const studentApi = {
     apiRequest<HintRequestResult>(`/student/sessions/${sessionId}/questions/${questionId}/hints`, {
       method: "POST",
       ...json({ stageNumber }),
+    }),
+
+  recordViolation: (sessionId: string, body: RecordViolationBody) =>
+    apiRequest<RecordViolationResult>(`/student/sessions/${sessionId}/violations`, {
+      method: "POST",
+      ...json(body),
     }),
 };

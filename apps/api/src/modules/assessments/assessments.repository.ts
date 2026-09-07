@@ -1,6 +1,7 @@
 import type { Prisma } from "@gradevision/database";
 
 import { prisma } from "../../services/database.js";
+import { runWithResultsArgs } from "../results/mapper.js";
 
 /** Matches assessments the instructor owns: their section's, or their own section-less drafts. */
 function ownedBy(instructorId: string): Prisma.AssessmentWhereInput {
@@ -153,6 +154,38 @@ export function loadAssessmentResults(assessmentId: string, instructorId: string
           },
         },
       },
+    },
+  });
+}
+
+/** One session's full per-question breakdown, ownership-scoped to the instructor. */
+export function loadAssessmentSessionResult(
+  assessmentId: string,
+  sessionId: string,
+  instructorId: string,
+) {
+  return prisma.examSession.findFirst({
+    where: {
+      id: sessionId,
+      assessmentId,
+      assessment: { ...ownedBy(instructorId) },
+    },
+    include: {
+      student: { select: { id: true, name: true, email: true } },
+      assessment: {
+        select: {
+          id: true,
+          questions: {
+            orderBy: { position: "asc" },
+            include: { question: { select: { id: true, title: true } } },
+          },
+        },
+      },
+      submissions: {
+        orderBy: { attemptNumber: "desc" },
+        include: { evaluationRuns: { where: { runNumber: 1 }, ...runWithResultsArgs } },
+      },
+      _count: { select: { violations: true } },
     },
   });
 }

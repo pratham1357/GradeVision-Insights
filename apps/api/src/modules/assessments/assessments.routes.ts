@@ -1,12 +1,15 @@
 import { Router } from "express";
 
 import { requireRole, validateBody, validateParams } from "../../middleware/index.js";
+import { getSessionViolationsView } from "../integrity/integrity.controller.js";
+import { assessmentSessionParamsSchema } from "../integrity/integrity.schema.js";
 import {
   attachAssessmentQuestion,
   createAssessment,
   deleteAssessmentQuestion,
   getAssessment,
   getAssessmentResultsView,
+  getAssessmentSessionResultView,
   listAssessments,
   patchAssessmentQuestion,
   reorderAssessmentQuestions,
@@ -38,6 +41,16 @@ assessmentsRouter.get(
   "/:assessmentId/results",
   validateParams(assessmentParamsSchema),
   getAssessmentResultsView,
+);
+assessmentsRouter.get(
+  "/:assessmentId/sessions/:sessionId/result",
+  validateParams(assessmentSessionParamsSchema),
+  getAssessmentSessionResultView,
+);
+assessmentsRouter.get(
+  "/:assessmentId/sessions/:sessionId/violations",
+  validateParams(assessmentSessionParamsSchema),
+  getSessionViolationsView,
 );
 assessmentsRouter.patch(
   "/:assessmentId",

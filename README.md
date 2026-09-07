@@ -27,18 +27,21 @@ Services are independent packages with explicit boundaries — see
 the **instructor assessment-authoring** workflow (courses/sections, assessments, coding
 questions, VISIBLE/HIDDEN test cases, rubric criteria), and the **student
 assessment-taking** workflow (discovery, timed exam sessions, autosaving Monaco editor,
-per-question submissions), and the **automated evaluation pipeline** (async
+per-question submissions), the **automated evaluation pipeline** (async
 Judge0-backed execution of visible + hidden tests, deterministic rubric/semantic
-grading, student + instructor results) plus **progressive AI hints** (static
-stages then an env-configured LLM mentor) — with a small React console for each
-role. WebSockets / live proctoring are **not** implemented yet.
+grading, student + instructor results), **progressive AI hints** (static stages
+then an env-configured LLM mentor), **lightweight assessment integrity**
+(focus/fullscreen violation tracking + an instructor monitoring dashboard), and
+**Socket.IO live updates** (evaluation status and monitoring, with automatic
+fallback to polling) — with a small React console for each role. Enforced
+proctoring (lockdown/camera) is **not** implemented and out of scope.
 
 ## Repository structure
 
 ```
 apps/
   web/            React + Vite console — instructor authoring + student exam (React Router, Tailwind, Monaco)
-  api/            Express + TypeScript REST API (layered; /api/v1/{health,auth,courses,assessments,questions,student})
+  api/            Express + TypeScript REST API (layered; /api/v1/*) + Socket.IO at /realtime
 services/
   evaluator/      Async submission evaluation: BullMQ/poll → Judge0 → grading → persist
   hint-engine/    Backend-only progressive-hint LLM provider (Gemini via fetch)

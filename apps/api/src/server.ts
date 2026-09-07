@@ -1,12 +1,19 @@
+import { createServer } from "node:http";
+
 import { createApp } from "./app.js";
 import { env } from "./env.js";
+import { initRealtime, shutdownRealtime } from "./realtime/index.js";
 import { disconnectDatabase } from "./services/database.js";
 import { closeEvaluationQueue } from "./services/evaluation-queue.js";
 import { logger } from "./utils/logger.js";
 
 const app = createApp();
+const server = createServer(app);
 
-const server = app.listen(env.PORT, env.HOST, () => {
+// Realtime is an enhancement on top of REST: attach it to the same HTTP server.
+initRealtime(server);
+
+server.listen(env.PORT, env.HOST, () => {
   logger.info(`API listening on http://${env.HOST}:${env.PORT}`, { env: env.NODE_ENV });
 });
 
@@ -16,6 +23,8 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info(`Received ${signal}, shutting down`);
+
+  await shutdownRealtime();
 
   server.close(async (closeError) => {
     if (closeError) logger.error("Error while closing HTTP server", { error: closeError.message });

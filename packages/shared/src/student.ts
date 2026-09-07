@@ -7,6 +7,7 @@
  */
 import type { SubmissionEvaluationSummary } from "./evaluation.js";
 import type { ProgrammingLanguage, QuestionDifficulty } from "./instructor.js";
+import type { SessionIntegritySummary } from "./integrity.js";
 
 export const EXAM_SESSION_STATUSES = [
   "NOT_STARTED",
@@ -95,6 +96,8 @@ export interface ExamSessionView {
   assessmentTitle: string;
   assessmentDescription: string | null;
   timing: SessionTiming;
+  /** Client-reported focus/fullscreen integrity signals for this session. */
+  integrity: SessionIntegritySummary;
   questions: ExamQuestion[];
 }
 

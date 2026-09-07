@@ -4,12 +4,14 @@ import type {
   AssessmentSummary,
   InstructorAssessmentResults,
   InstructorCourse,
+  InstructorSessionResult,
   ProgrammingLanguage,
   QuestionDetail,
   QuestionSummary,
   QuestionDifficulty,
   RubricCriterionType,
   RubricDto,
+  SessionViolationsView,
   TestCaseCategory,
   TestCaseVisibility,
 } from "@gradevision/shared";
@@ -74,6 +76,14 @@ export const instructorApi = {
   getAssessment: (id: string) => apiRequest<AssessmentDetail>(`/assessments/${id}`),
   getAssessmentResults: (id: string) =>
     apiRequest<InstructorAssessmentResults>(`/assessments/${id}/results`),
+  getSessionResult: (assessmentId: string, sessionId: string) =>
+    apiRequest<InstructorSessionResult>(
+      `/assessments/${assessmentId}/sessions/${sessionId}/result`,
+    ),
+  getSessionViolations: (assessmentId: string, sessionId: string) =>
+    apiRequest<SessionViolationsView>(
+      `/assessments/${assessmentId}/sessions/${sessionId}/violations`,
+    ),
   createAssessment: (body: AssessmentInput) =>
     apiRequest<AssessmentDetail>("/assessments", { method: "POST", ...json(body) }),
   updateAssessment: (id: string, body: AssessmentUpdateInput) =>

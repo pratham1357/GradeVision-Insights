@@ -14,6 +14,7 @@ import {
   createInstructorAssessment,
   editAssessmentQuestion,
   getAssessmentResults,
+  getAssessmentSessionResult,
   getInstructorAssessment,
   getInstructorAssessments,
   removeAssessmentQuestion,
@@ -50,6 +51,18 @@ export async function updateAssessment(req: Request, res: Response): Promise<voi
 export async function getAssessmentResultsView(req: Request, res: Response): Promise<void> {
   const { userId } = getAuthContext(req);
   sendData(res, await getAssessmentResults(pathParam(req, "assessmentId"), userId));
+}
+
+export async function getAssessmentSessionResultView(req: Request, res: Response): Promise<void> {
+  const { userId } = getAuthContext(req);
+  sendData(
+    res,
+    await getAssessmentSessionResult(
+      pathParam(req, "assessmentId"),
+      pathParam(req, "sessionId"),
+      userId,
+    ),
+  );
 }
 
 export async function attachAssessmentQuestion(req: Request, res: Response): Promise<void> {

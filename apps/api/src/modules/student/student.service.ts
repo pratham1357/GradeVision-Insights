@@ -18,6 +18,8 @@ import {
   HintProviderUnavailableError,
   requestInteractiveHint,
 } from "../../services/hint-engine.js";
+import { emitSessionChanged } from "../../realtime/index.js";
+import { getSessionIntegrity } from "../integrity/integrity.service.js";
 import { toEvaluationDetail } from "../results/mapper.js";
 import {
   createHintUsage,
@@ -228,7 +230,10 @@ export async function finishSession(
 }
 
 async function buildSessionView(sessionId: string, now: Date): Promise<ExamSessionView> {
-  const row: SessionViewRow = await loadSessionView(sessionId);
+  const [row, integrity] = await Promise.all([
+    loadSessionView(sessionId),
+    getSessionIntegrity(sessionId),
+  ]);
   const draftByQuestion = new Map(row.drafts.map((d) => [d.questionId, d]));
   const submissionsByQuestion = new Map<string, SessionViewRow["submissions"]>();
   for (const submission of row.submissions) {
@@ -282,6 +287,7 @@ async function buildSessionView(sessionId: string, now: Date): Promise<ExamSessi
     assessmentTitle: row.assessment.title,
     assessmentDescription: row.assessment.description,
     timing: computeTiming(row, now),
+    integrity,
     questions,
   };
 }
@@ -344,6 +350,8 @@ export async function submitCode(
   // Best-effort: nudge the evaluator. Without Redis this is a no-op and the
   // evaluator's PostgreSQL poller picks the QUEUED row up instead.
   await enqueueEvaluation(submission.id);
+  // Push the "queued" state to any connected exam client immediately.
+  emitSessionChanged(sessionId);
 
   return {
     submission: {

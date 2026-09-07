@@ -1,6 +1,8 @@
 import { Router } from "express";
 
 import { requireRole, validateBody, validateParams } from "../../middleware/index.js";
+import { recordSessionViolation } from "../integrity/integrity.controller.js";
+import { recordViolationSchema } from "../integrity/integrity.schema.js";
 import {
   finishExamSession,
   getExamSession,
@@ -73,4 +75,12 @@ studentRouter.get(
   "/submissions/:submissionId",
   validateParams(submissionParamsSchema),
   getSubmissionResultView,
+);
+
+// Assessment integrity: client-reported focus/fullscreen signals for this session.
+studentRouter.post(
+  "/sessions/:sessionId/violations",
+  validateParams(sessionParamsSchema),
+  validateBody(recordViolationSchema),
+  recordSessionViolation,
 );

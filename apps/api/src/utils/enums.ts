@@ -11,6 +11,8 @@ import type {
   TestCaseCategory as PrismaTestCaseCategory,
   TestCaseResultStatus as PrismaTestCaseResultStatus,
   TestCaseVisibility as PrismaTestCaseVisibility,
+  ViolationSeverity as PrismaViolationSeverity,
+  ViolationType as PrismaViolationType,
 } from "@gradevision/database";
 import type {
   AssessmentStatus,
@@ -25,6 +27,8 @@ import type {
   TestCaseCategory,
   TestCaseResultStatus,
   TestCaseVisibility,
+  ViolationSeverity,
+  ViolationType,
 } from "@gradevision/shared";
 
 export {
@@ -40,6 +44,8 @@ export {
   TEST_CASE_CATEGORIES,
   TEST_CASE_RESULT_STATUSES,
   TEST_CASE_VISIBILITIES,
+  VIOLATION_SEVERITIES,
+  VIOLATION_TYPES,
 } from "@gradevision/shared";
 
 // Compile-time guarantee that each shared enum union is identical to its Prisma
@@ -58,5 +64,7 @@ const _enumsInSync: [
   Same<TestCaseCategory, PrismaTestCaseCategory>,
   Same<TestCaseResultStatus, PrismaTestCaseResultStatus>,
   Same<TestCaseVisibility, PrismaTestCaseVisibility>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<ViolationSeverity, PrismaViolationSeverity>,
+  Same<ViolationType, PrismaViolationType>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true];
 void _enumsInSync;
