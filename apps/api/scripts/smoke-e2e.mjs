@@ -187,6 +187,40 @@ try {
   check("instructor results show A's score", Boolean(rowA) && rowA.totalScore === 100);
   check("instructor stats aggregate both students", instrResults.body.stats.totalStudents === 2);
 
+  // --- Instructor monitoring: real student roster + system metrics ----------
+  const monitor = await api("GET", "/monitoring/students", instructor);
+  const monitoredA = monitor.body.students?.find((s) => s.email === "student1@example.edu");
+  check(
+    "student monitor lists real enrolled students with activity",
+    monitor.status === 200 &&
+      Array.isArray(monitor.body.students) &&
+      Boolean(monitoredA) &&
+      monitoredA.submissionCount >= 1 &&
+      monitor.body.summary.totalStudents >= 2,
+  );
+  check(
+    "students cannot read instructor monitoring",
+    (await api("GET", "/monitoring/students", studentA)).status === 403,
+  );
+
+  const metrics = await api("GET", "/monitoring/system", instructor);
+  check(
+    "system metrics report real runtime measurements",
+    metrics.status === 200 &&
+      metrics.body.memory.rssBytes > 0 &&
+      typeof metrics.body.process.uptimeSeconds === "number" &&
+      metrics.body.requests.total >= 1 &&
+      metrics.body.database.status === "up",
+  );
+  check(
+    "system metrics expose no secrets / connection strings",
+    !/postgresql:\/\/|jwt_secret|database_url|password/i.test(JSON.stringify(metrics.body)),
+  );
+  check(
+    "students cannot read system metrics",
+    (await api("GET", "/monitoring/system", studentA)).status === 403,
+  );
+
   // --- Temporary Gemini execution fallback: Student B, with `fetch` stubbed so
   // no real model is called. Proves the pipeline still produces a normal result
   // and that nothing about the provider leaks to the student.

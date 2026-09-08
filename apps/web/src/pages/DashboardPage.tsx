@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { instructorApi } from "../lib/instructor-api";
 import { useApi } from "../lib/use-api";
 import { Alert, Badge, Button, Card, EmptyState, PageHeader, Spinner } from "../components/ui";
+import { StudentMonitorCard, SystemMetricsCard } from "../components/InstructorMonitor";
 
 const STATUS_TONE: Record<AssessmentStatus, "neutral" | "info" | "success" | "warning"> = {
   DRAFT: "neutral",
@@ -68,6 +69,8 @@ export function DashboardPage() {
           </ul>
         )}
       </Card>
+
+      <StudentMonitorCard />
 
       <Card title="Assessments">
         {assessments.loading ? (
@@ -154,6 +157,8 @@ export function DashboardPage() {
           </ul>
         )}
       </Card>
+
+      <SystemMetricsCard />
     </div>
   );
 }

@@ -31,7 +31,8 @@ per-question submissions), the **automated evaluation pipeline** (async
 Judge0-backed execution of visible + hidden tests, deterministic rubric/semantic
 grading, student + instructor results), **progressive AI hints** (static stages
 then an env-configured LLM mentor), **lightweight assessment integrity**
-(focus/fullscreen violation tracking + an instructor monitoring dashboard), and
+(focus/fullscreen violation tracking + an instructor monitoring dashboard with a
+real student roster and API-process runtime metrics), and
 **Socket.IO live updates** (evaluation status and monitoring, with automatic
 fallback to polling) — with a small React console for each role. Enforced
 proctoring (lockdown/camera) is **not** implemented and out of scope.

@@ -5,7 +5,9 @@ import type {
   InstructorAssessmentResults,
   InstructorCourse,
   InstructorSessionResult,
+  InstructorStudentMonitor,
   ProgrammingLanguage,
+  SystemMetrics,
   QuestionDetail,
   QuestionSummary,
   QuestionDifficulty,
@@ -71,6 +73,9 @@ export interface RubricCriterionInput {
  */
 export const instructorApi = {
   listCourses: () => apiRequest<InstructorCourse[]>("/courses"),
+
+  getStudentMonitor: () => apiRequest<InstructorStudentMonitor>("/monitoring/students"),
+  getSystemMetrics: () => apiRequest<SystemMetrics>("/monitoring/system"),
 
   listAssessments: () => apiRequest<AssessmentSummary[]>("/assessments"),
   getAssessment: (id: string) => apiRequest<AssessmentDetail>(`/assessments/${id}`),

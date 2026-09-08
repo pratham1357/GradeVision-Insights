@@ -371,6 +371,23 @@ rubricPercent`). `GET .../sessions/:sessionId/result` drills into one student
   - the same `toEvaluationDetail` mapper, so **hidden test input/expected/actual
     output stay redacted even for the instructor**.
 
+### Instructor monitoring (`modules/monitoring`, INSTRUCTOR/ADMIN only)
+
+- `GET /api/v1/monitoring/students` - the instructor's real student roster,
+  built from `User`/`Enrollment`/`ExamSession`/`Submission`/`EvaluationRun`/
+  `Violation`. Every query is scoped to `section.instructorId`; there are no ids
+  in the request, so there is nothing to enumerate. Per student: sections,
+  assessments assigned/started/submitted, submission count, latest submission +
+  score, mean graded score, violation count + `flagged` (>= 3), last activity.
+- `GET /api/v1/monitoring/system` - API-process runtime metrics measured on the
+  spot: uptime / boot time, a short `process.cpuUsage()` sample, `memoryUsage()`,
+  a `SELECT 1` latency probe, and in-memory request counters (in-flight, total,
+  last / rolling-average server-side processing time - fed by
+  `requestMetricsMiddleware`). Operational counters only: no env vars, secrets,
+  connection strings, file paths, or stack traces. A metric that cannot be read
+  is `null`, never invented. The dashboard polls both (20s / 10s); neither
+  depends on Socket.IO.
+
 ## Assessment integrity
 
 Lightweight and non-invasive: the browser reports only page-focus and

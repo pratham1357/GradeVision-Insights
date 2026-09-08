@@ -2,7 +2,13 @@ import cors from "cors";
 import express, { type Express } from "express";
 
 import { API_PREFIX, JSON_BODY_LIMIT, corsOptions } from "./config/index.js";
-import { errorHandler, notFoundHandler, requestId, requestLogger } from "./middleware/index.js";
+import {
+  errorHandler,
+  notFoundHandler,
+  requestId,
+  requestLogger,
+  requestMetricsMiddleware,
+} from "./middleware/index.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { apiRouter } from "./routes/index.js";
 
@@ -18,6 +24,7 @@ export function createApp(): Express {
   // Observability
   app.use(requestId);
   app.use(requestLogger);
+  app.use(requestMetricsMiddleware);
 
   // Security / parsing baseline
   app.use(cors(corsOptions));

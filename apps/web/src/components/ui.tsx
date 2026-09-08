@@ -211,6 +211,24 @@ export function Badge({
   );
 }
 
+/** Compact metric tile: a big value over a small uppercase label. */
+export function StatTile({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-md border border-neutral-200 bg-white px-3 py-2" title={hint}>
+      <div className="text-lg font-semibold tabular-nums">{value}</div>
+      <div className="text-xs uppercase tracking-wide text-neutral-400">{label}</div>
+    </div>
+  );
+}
+
 export function Spinner({ label = "Loading…" }: { label?: string }) {
   return (
     <div className="flex items-center justify-center gap-2 py-10 text-sm text-neutral-500">
