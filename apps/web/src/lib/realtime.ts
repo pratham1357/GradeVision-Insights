@@ -9,9 +9,18 @@ export interface RealtimeHandlers {
   onSessionChanged?: () => void;
   onAssessmentChanged?: () => void;
   onViolation?: (violationCount: number) => void;
-  /** Connection status changes - the caller uses this to fall back to polling. */
+  /**
+   * Fires every time a subscription is (re)confirmed - including after an
+   * automatic reconnect. Callers use it to re-fetch once so no event is missed
+   * during a network gap.
+   */
+  onReady?: () => void;
+  /** `true` once subscribed, `false` on disconnect / auth failure. Drives the polling fallback. */
   onStatus?: (connected: boolean) => void;
 }
+
+/** Injectable for tests; defaults to the real socket.io client. */
+export type SocketFactory = (url: string, opts: Record<string, unknown>) => Socket;
 
 /**
  * Opens a realtime connection and subscribes. The socket carries only
@@ -22,22 +31,26 @@ export interface RealtimeHandlers {
 export function connectRealtime(
   subscription: RealtimeSubscribeMessage,
   handlers: RealtimeHandlers,
+  factory: SocketFactory = (url, opts) => io(url, opts),
 ): () => void {
   const token = tokenStorage.get();
   if (!token) return () => {};
 
-  const socket: Socket = io(BASE_URL, {
+  const socket = factory(BASE_URL, {
     path: REALTIME_PATH,
     auth: { token },
     transports: ["websocket", "polling"],
     reconnection: true,
     reconnectionDelay: 1_000,
     reconnectionDelayMax: 10_000,
+    timeout: 8_000,
   });
 
-  socket.on("connect", () => {
-    socket.emit("subscribe", subscription);
+  // (Re)subscribe on every (re)connect so a dropped socket self-heals.
+  socket.on("connect", () => socket.emit("subscribe", subscription));
+  socket.on("subscribe:ok", () => {
     handlers.onStatus?.(true);
+    handlers.onReady?.();
   });
   socket.on("subscribe:error", () => handlers.onStatus?.(false));
   socket.on("disconnect", () => handlers.onStatus?.(false));

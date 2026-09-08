@@ -40,13 +40,16 @@ export class GeminiProvider implements LLMProvider {
       throw new Error("Gemini API key is not configured");
     }
 
-    const url =
-      `${this.config.baseUrl}/models/${encodeURIComponent(this.config.model)}:generateContent` +
-      `?key=${encodeURIComponent(this.config.apiKey)}`;
+    // Key goes in a header, never the URL/query string (keeps it out of any
+    // proxy / access logs). Model + base URL are env-driven.
+    const url = `${this.config.baseUrl}/models/${encodeURIComponent(this.config.model)}:generateContent`;
 
     const response = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "x-goog-api-key": this.config.apiKey,
+      },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: HINT_SYSTEM_PROMPT }] },
         contents: [{ role: "user", parts: [{ text: buildHintPrompt(request) }] }],

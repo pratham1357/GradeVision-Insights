@@ -219,10 +219,15 @@ for the role gate — a STUDENT hitting an instructor route.)
 
 New assessments are `DRAFT`. Content fields (`title`, `description`,
 `durationMinutes`) and question changes are allowed only while `DRAFT`
-(otherwise `409 ASSESSMENT_NOT_EDITABLE`). Status may move
-`DRAFT ↔ SCHEDULED`, `→ CLOSED`, `→ ARCHIVED`, and `CLOSED → DRAFT`; `ACTIVE` and
-the exam-run lifecycle are deferred. Questions are shared entities linked through
-`AssessmentQuestion` (never copied); the join row carries `position` and `points`.
+(otherwise `409 ASSESSMENT_NOT_EDITABLE`). Legal status transitions
+(`ALLOWED_TRANSITIONS` in the service, `409 INVALID_STATUS_TRANSITION` otherwise):
+`DRAFT`/`SCHEDULED` → `SCHEDULED`/`ACTIVE`/`CLOSED`/`ARCHIVED`; `ACTIVE` → `CLOSED`
+only (an in-progress exam is never yanked out from under a student);
+`CLOSED` → `DRAFT`/`ACTIVE`/`ARCHIVED`. Activating / closing an assessment emits
+`assessment:changed` and fans `session:changed` out to every in-progress session,
+so open exam pages and the monitoring dashboard react without a reload. Questions
+are shared entities linked through `AssessmentQuestion` (never copied); the join
+row carries `position` and `points`.
 
 ### Frontend
 
@@ -386,10 +391,14 @@ signals, never data.
   (`authenticateSocket`). Every room join is ownership-checked - a student may
   only join `session:<own-session>`, an instructor only `assessment:<owned>`.
 - **Change detection**: the API cannot see the evaluator's DB writes, so
-  `RealtimeWatcher` polls the newest `EvaluationRun` / `Violation` timestamp per
-  _subscribed_ scope (only while someone is connected) and emits
-  `session:changed` / `assessment:changed`. Direct actions (`submitCode`,
-  `recordViolation`) emit immediately.
+  `RealtimeWatcher` polls the newest `EvaluationRun` / `Violation` /
+  `ExamSession` / `Assessment` `updatedAt` per _subscribed_ scope (only while
+  someone is connected) and emits `session:changed` / `assessment:changed` — the
+  ~3 s safety net. Direct actions (`submitCode`, `recordViolation`, an
+  instructor status change) emit immediately.
+- **Reconnect**: `connectRealtime` re-subscribes on every (re)connect and fires
+  `onReady` once per confirmed subscription; the exam page / dashboard re-fetch
+  on `onReady` so any gap during a disconnect self-heals.
 - **Fallback**: the exam page and results dashboard keep their interval polling
   and simply slow it down while the socket is connected (`onStatus`). A dropped
   socket resumes fast polling. No second state store - the socket handler just

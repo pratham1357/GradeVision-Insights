@@ -176,6 +176,53 @@ describe("assessments", () => {
       .set("Authorization", instructorA);
     expect(stillMine.body.data.title).toBe("Edited");
   });
+
+  it("activates a DRAFT assessment that has questions, then closes it", async () => {
+    const created = await request(app)
+      .post("/api/v1/assessments")
+      .set("Authorization", instructorA)
+      .send({ title: "Activatable", sectionId: ID.sectionA });
+    const id: string = created.body.data.id;
+
+    const q = await request(app)
+      .post("/api/v1/questions")
+      .set("Authorization", instructorA)
+      .send({ title: "Q for activation", statement: "s", difficulty: "EASY", languages: [] });
+    await request(app)
+      .post(`/api/v1/assessments/${id}/questions`)
+      .set("Authorization", instructorA)
+      .send({ questionId: q.body.data.id, points: 100 });
+
+    const activated = await request(app)
+      .patch(`/api/v1/assessments/${id}`)
+      .set("Authorization", instructorA)
+      .send({ status: "ACTIVE" });
+    expect(activated.status).toBe(200);
+    expect(activated.body.data.status).toBe("ACTIVE");
+
+    // Content edits are locked once it is no longer DRAFT.
+    const lockedEdit = await request(app)
+      .patch(`/api/v1/assessments/${id}`)
+      .set("Authorization", instructorA)
+      .send({ title: "nope" });
+    expect(lockedEdit.status).toBe(409);
+    expect(lockedEdit.body.error.code).toBe("ASSESSMENT_NOT_EDITABLE");
+
+    // ACTIVE only transitions to CLOSED.
+    const badTransition = await request(app)
+      .patch(`/api/v1/assessments/${id}`)
+      .set("Authorization", instructorA)
+      .send({ status: "SCHEDULED" });
+    expect(badTransition.status).toBe(409);
+    expect(badTransition.body.error.code).toBe("INVALID_STATUS_TRANSITION");
+
+    const closed = await request(app)
+      .patch(`/api/v1/assessments/${id}`)
+      .set("Authorization", instructorA)
+      .send({ status: "CLOSED" });
+    expect(closed.status).toBe(200);
+    expect(closed.body.data.status).toBe("CLOSED");
+  });
 });
 
 describe("questions, test cases, rubric", () => {

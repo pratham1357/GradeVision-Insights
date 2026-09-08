@@ -140,20 +140,26 @@ pnpm typecheck
 pnpm lint
 pnpm format:check
 pnpm build
-pnpm test        # vitest (apps/api)
+pnpm test        # vitest across apps/api, apps/web and the packages/services
 ```
 
-`pnpm test` has two kinds of suites:
+`pnpm test` has three kinds of suites:
 
-- `auth` / `jwt` / `password` / `realtime/watcher` / `realtime/io` — mocked or
-  pure-logic, no database.
-- `instructor` / `student` / `results-hints` / `integrity` / `realtime/io.integration`
-  / evaluator `evaluate` — real integration tests. They need PostgreSQL running
-  and the schema migrated (`DATABASE_URL`, the seeded dev DB locally). Each
-  creates its own fixtures under a fixed id prefix (`ffffffff-…`, `eeeeeeee-…`,
-  `dddddddd-…`, `cccccccc-…`, `bbbbbbbb-…`, `aaaaaaaa-…`) and removes them before
-  and after, so seed data is never touched. Judge0 is never required — the
-  evaluator suite uses a mock `ExecutionProvider`.
+- `apps/web` (`api-client`, `realtime`, `use-integrity-monitor`, `config-isolation`),
+  `auth` / `jwt` / `password` / `realtime/watcher` / `realtime/io` — pure-logic /
+  mocked, no database, no DOM.
+- `instructor` / `student` / `results-hints` / `integrity` / `multi-student` /
+  `realtime/io.integration` / evaluator `evaluate` — real integration tests. They
+  need PostgreSQL running and the schema migrated (`DATABASE_URL`, the seeded dev
+  DB locally). Each creates its own fixtures under a fixed id prefix
+  (`ffffffff-…`, `eeeeeeee-…`, `dddddddd-…`, `cccccccc-…`, `bbbbbbbb-…`,
+  `aaaaaaaa-…`, `71000000-…`) and removes them before and after, so seed data is
+  never touched. Judge0 is never required — the evaluator suite uses a mock
+  `ExecutionProvider`.
+- `pnpm --filter @gradevision/api smoke` — a headless end-to-end run against the
+  seeded DB (instructor activates an assessment → two students take it → submit →
+  grade → realtime nudges → integrity flag → static hint). Needs `pnpm build`
+  first; leaves the DB as it found it.
 
 ## Instructor workflow (manual check)
 
@@ -229,10 +235,13 @@ Two terminals: `pnpm --filter @gradevision/api dev` and
 the run finishes as a clean `FAILED` and the flow still demos end to end.
 
 1. **Instructor** — sign in as `instructor@example.edu` / `instructor-dev-password`.
-   Open **CS101 - Live Coding Assessment** → **Results** (the monitoring
-   dashboard: stat tiles, per-student rows, integrity column). Leave it open.
-2. **Student** — another browser/profile, `student1@example.edu` /
-   `student-dev-password`. `/student` → **Start assessment**.
+   Either use the seeded **CS101 - Live Coding Assessment**, or create your own:
+   **New assessment** → add a question → **Activate**. Open its **Results** page
+   (stat tiles, per-student rows, integrity column) and leave it open.
+2. **Students** — sign in as `student1@example.edu` and `student2@example.edu`
+   (`student-dev-password`) in two browser profiles. Each `/student` page picks
+   up a newly-activated assessment within a few seconds. **Start exam** — they
+   get independent sessions.
 3. Solve **Sum of Two Integers** in Python
    (`a, b = map(int, input().split()); print(a + b)`) → **Submit this question**.
 4. Watch the status badge move `Queued → Evaluating → Scored X/Y` (live via the

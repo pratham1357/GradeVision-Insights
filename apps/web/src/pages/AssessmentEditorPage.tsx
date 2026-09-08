@@ -160,20 +160,30 @@ function AssessmentForm({
       </div>
 
       {banner ? <Alert kind={banner.kind}>{banner.text}</Alert> : null}
-      {!editable ? (
+      {assessment.status === "ACTIVE" ? (
+        <Alert kind="success" title="Live">
+          Enrolled students can start this exam now. Watch it on the{" "}
+          <Link to={`/assessments/${assessment.id}/results`} className="underline">
+            results & monitoring
+          </Link>{" "}
+          page.
+        </Alert>
+      ) : !editable ? (
         <Alert kind="info">
-          This assessment is {assessment.status}. Only DRAFT assessments can be edited.
+          This assessment is {assessment.status}. Only DRAFT assessments can have their content
+          edited.
         </Alert>
       ) : null}
 
       <Card
-        title="Details"
+        title="Status & details"
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {assessment.status === "DRAFT" ? (
               <Button
+                size="sm"
                 variant="secondary"
-                disabled={saving}
+                loading={saving}
                 onClick={() =>
                   run(
                     () => instructorApi.updateAssessment(assessment.id, { status: "SCHEDULED" }),
@@ -184,10 +194,41 @@ function AssessmentForm({
                 Schedule
               </Button>
             ) : null}
-            {assessment.status !== "ARCHIVED" ? (
+            {["DRAFT", "SCHEDULED", "CLOSED"].includes(assessment.status) &&
+            assessment.questions.length > 0 ? (
               <Button
+                size="sm"
+                loading={saving}
+                onClick={() =>
+                  run(
+                    () => instructorApi.updateAssessment(assessment.id, { status: "ACTIVE" }),
+                    "Assessment is now live for students",
+                  )
+                }
+              >
+                {assessment.status === "CLOSED" ? "Reopen" : "Activate"}
+              </Button>
+            ) : null}
+            {assessment.status === "ACTIVE" ? (
+              <Button
+                size="sm"
                 variant="danger"
-                disabled={saving}
+                loading={saving}
+                onClick={() =>
+                  run(
+                    () => instructorApi.updateAssessment(assessment.id, { status: "CLOSED" }),
+                    "Assessment closed",
+                  )
+                }
+              >
+                Close exam
+              </Button>
+            ) : null}
+            {assessment.status !== "ARCHIVED" && assessment.status !== "ACTIVE" ? (
+              <Button
+                size="sm"
+                variant="danger"
+                loading={saving}
                 onClick={() =>
                   run(
                     () => instructorApi.updateAssessment(assessment.id, { status: "ARCHIVED" }),

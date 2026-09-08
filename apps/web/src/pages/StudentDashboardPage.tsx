@@ -1,24 +1,45 @@
 import type { StudentAssessmentSummary } from "@gradevision/shared";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { studentApi } from "../lib/student-api";
 import { messageFromError, useApi } from "../lib/use-api";
-import { Alert, Badge, Button, Card, EmptyState, Spinner } from "../components/ui";
+import { Alert, Badge, Button, Card, EmptyState, PageHeader, Spinner } from "../components/ui";
+
+const REFRESH_MS = 20_000;
 
 export function StudentDashboardPage() {
-  const { data, loading, error } = useApi(() => studentApi.listAssessments(), []);
+  const { data, loading, error, reload } = useApi(() => studentApi.listAssessments(), []);
+
+  // Light poll so an assessment the instructor just activated shows up without
+  // a manual reload. (The dashboard has no session/assessment to subscribe to.)
+  useEffect(() => {
+    const id = window.setInterval(() => reload(), REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [reload]);
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Your assessments</h1>
+    <div className="space-y-5">
+      <PageHeader
+        title="Your assessments"
+        subtitle="Assessments your instructor has made available to you."
+        actions={
+          <Button size="sm" variant="secondary" onClick={reload}>
+            Refresh
+          </Button>
+        }
+      />
 
-      {loading ? (
-        <Spinner />
+      {loading && !data ? (
+        <Spinner label="Loading your assessments…" />
       ) : error ? (
-        <Alert kind="error">{error}</Alert>
+        <Alert kind="error" onRetry={reload}>
+          {error}
+        </Alert>
       ) : !data?.length ? (
-        <EmptyState>No assessments are open for you right now.</EmptyState>
+        <EmptyState>
+          No assessments are open for you right now. This page refreshes automatically.
+        </EmptyState>
       ) : (
         <div className="space-y-3">
           {data.map((assessment) => (
@@ -56,39 +77,44 @@ function AssessmentCard({ assessment }: { assessment: StudentAssessmentSummary }
 
   return (
     <Card
-      title={assessment.title}
+      title={
+        <span className="flex items-center gap-2">
+          {assessment.title}
+          {resumable ? <Badge tone="info">In progress</Badge> : null}
+          {finished ? <Badge tone="neutral">{session?.status}</Badge> : null}
+        </span>
+      }
       actions={
-        finished ? (
-          <Badge>{session?.status}</Badge>
-        ) : (
-          <Button onClick={open} disabled={starting}>
-            {starting ? "Opening…" : resumable ? "Resume" : "Start assessment"}
+        finished ? null : (
+          <Button loading={starting} onClick={open}>
+            {starting ? "Opening…" : resumable ? "Resume exam" : "Start exam"}
           </Button>
         )
       }
     >
-      {error ? <Alert kind="error">{error}</Alert> : null}
+      {error ? (
+        <div className="mb-2">
+          <Alert kind="error" onRetry={open}>
+            {error}
+          </Alert>
+        </div>
+      ) : null}
       {assessment.description ? (
         <p className="text-sm text-neutral-600">{assessment.description}</p>
       ) : null}
       <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-neutral-500">
-        <div>
-          <dt className="inline font-medium">Course:</dt>{" "}
-          <dd className="inline">
-            {assessment.courseCode ?? "—"} / {assessment.sectionName ?? "—"}
-          </dd>
-        </div>
-        <div>
-          <dt className="inline font-medium">Questions:</dt>{" "}
-          <dd className="inline">{assessment.questionCount}</dd>
-        </div>
-        <div>
-          <dt className="inline font-medium">Time limit:</dt>{" "}
-          <dd className="inline">
-            {assessment.durationMinutes ? `${assessment.durationMinutes} min` : "none"}
-          </dd>
-        </div>
-        {finished ? <div className="text-neutral-400">Your attempt is complete.</div> : null}
+        <span>
+          <span className="font-medium">Course:</span> {assessment.courseCode ?? "—"} /{" "}
+          {assessment.sectionName ?? "—"}
+        </span>
+        <span>
+          <span className="font-medium">Questions:</span> {assessment.questionCount}
+        </span>
+        <span>
+          <span className="font-medium">Time limit:</span>{" "}
+          {assessment.durationMinutes ? `${assessment.durationMinutes} min` : "none"}
+        </span>
+        {finished ? <span className="text-neutral-400">Your attempt is complete.</span> : null}
       </dl>
     </Card>
   );

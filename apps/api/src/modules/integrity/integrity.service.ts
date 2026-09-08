@@ -19,6 +19,9 @@ import {
 } from "./integrity.repository.js";
 import type { RecordViolationInput } from "./integrity.schema.js";
 
+/** Upper bound on persisted violation rows per session (anti-spam). */
+const MAX_VIOLATIONS_PER_SESSION = 300;
+
 /** Focus/visibility signals are advisory (LOW); a fullscreen exit is a firmer signal. */
 const SEVERITY_BY_TYPE: Record<ViolationType, ViolationSeverity> = {
   FULLSCREEN_EXIT: "MEDIUM",
@@ -69,6 +72,17 @@ export async function recordViolation(
   // Only meaningful while the attempt is live; a finished session is immutable.
   if (session.status !== "IN_PROGRESS") {
     throw new ApiError(409, "SESSION_NOT_ACTIVE", "This exam session is not in progress");
+  }
+
+  // Cheap guard against a misbehaving / malicious client spamming rows: once the
+  // count is very high the signal is already made; stop persisting more.
+  const before = await violationSummary(sessionId);
+  if (before._count._all >= MAX_VIOLATIONS_PER_SESSION) {
+    return {
+      recorded: false,
+      violationCount: before._count._all,
+      warning: integrityWarning(before._count._all, before._max.occurredAt),
+    };
   }
 
   await createViolation({

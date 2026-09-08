@@ -14,6 +14,7 @@ import { ApiError } from "../../utils/api-error.js";
 import { findInstructorSection } from "../courses/courses.repository.js";
 import { violationCountsBySession } from "../integrity/integrity.repository.js";
 import { findOwnedQuestionMeta } from "../questions/questions.repository.js";
+import { emitAssessmentChanged, emitAssessmentSessionsChanged } from "../../realtime/index.js";
 import { toEvaluationDetail } from "../results/mapper.js";
 import {
   attachQuestion,
@@ -73,14 +74,19 @@ function toDetail(row: DetailRow): AssessmentDetail {
   };
 }
 
-// Instructor-editable transitions for this MVP. ACTIVE is exam-lifecycle, deferred.
+// Legal instructor-editable status transitions. Content edits stay DRAFT-only
+// (see updateInstructorAssessment); status-only changes follow this table.
 const ALLOWED_TRANSITIONS: Record<AssessmentStatus, AssessmentStatus[]> = {
-  DRAFT: ["SCHEDULED", "CLOSED", "ARCHIVED"],
-  SCHEDULED: ["DRAFT", "CLOSED", "ARCHIVED"],
-  ACTIVE: [],
-  CLOSED: ["DRAFT", "ARCHIVED"],
+  DRAFT: ["SCHEDULED", "ACTIVE", "CLOSED", "ARCHIVED"],
+  SCHEDULED: ["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"],
+  ACTIVE: ["CLOSED"],
+  CLOSED: ["DRAFT", "ACTIVE", "ARCHIVED"],
   ARCHIVED: [],
 };
+
+// Statuses in which a student may already be sitting the exam. A status change
+// into / out of these is pushed to every in-progress session immediately.
+const LIVE_STATUSES = new Set<AssessmentStatus>(["ACTIVE", "CLOSED"]);
 
 async function loadOwnedAssessment(assessmentId: string, instructorId: string): Promise<DetailRow> {
   const assessment = await findInstructorAssessment(assessmentId, instructorId);
@@ -156,6 +162,17 @@ export async function updateInstructorAssessment(
       : {}),
     ...(input.status ? { status: input.status } : {}),
   });
+
+  // Realtime: the instructor's own dashboard, and any student currently sitting
+  // this exam, should reflect the change without a manual reload.
+  emitAssessmentChanged(assessmentId);
+  const statusChanged = input.status !== undefined && input.status !== current.status;
+  const touchesLiveExam =
+    statusChanged && (LIVE_STATUSES.has(current.status) || LIVE_STATUSES.has(updated.status));
+  if (touchesLiveExam || (statusChanged && updated.status === "ACTIVE")) {
+    await emitAssessmentSessionsChanged(assessmentId);
+  }
+
   return toDetail(updated);
 }
 

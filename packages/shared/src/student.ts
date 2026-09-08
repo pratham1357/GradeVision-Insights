@@ -6,7 +6,7 @@
  * data is never part of any student-facing type.
  */
 import type { SubmissionEvaluationSummary } from "./evaluation.js";
-import type { ProgrammingLanguage, QuestionDifficulty } from "./instructor.js";
+import type { AssessmentStatus, ProgrammingLanguage, QuestionDifficulty } from "./instructor.js";
 import type { SessionIntegritySummary } from "./integrity.js";
 
 export const EXAM_SESSION_STATUSES = [
@@ -95,6 +95,8 @@ export interface ExamSessionView {
   assessmentId: string;
   assessmentTitle: string;
   assessmentDescription: string | null;
+  /** Live assessment status - lets the exam page warn if the instructor closed it. */
+  assessmentStatus: AssessmentStatus;
   timing: SessionTiming;
   /** Client-reported focus/fullscreen integrity signals for this session. */
   integrity: SessionIntegritySummary;

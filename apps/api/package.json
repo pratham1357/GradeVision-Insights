@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "smoke": "node scripts/smoke-e2e.mjs",
     "clean": "rimraf dist *.tsbuildinfo"
   },
   "dependencies": {

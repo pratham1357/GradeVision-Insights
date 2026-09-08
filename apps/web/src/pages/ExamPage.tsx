@@ -22,9 +22,11 @@ import { requestExamFullscreen, useIntegrityMonitor } from "../lib/use-integrity
 import { messageFromError, useApi } from "../lib/use-api";
 
 const AUTOSAVE_DELAY_MS = 1500;
+const AUTOSAVE_RETRY_MS = 6_000;
 const REFRESH_INTERVAL_MS = 20_000;
 const EVALUATION_POLL_MS = 4_000;
 const LIVE_SAFETY_REFRESH_MS = 45_000;
+const SLOW_EVAL_NOTICE_MS = 35_000;
 
 const PENDING_EVAL_STATUSES = new Set(["PENDING", "RUNNING"]);
 
@@ -36,6 +38,29 @@ function isEvaluationPending(q: ExamQuestion): boolean {
       (s.evaluation !== null && PENDING_EVAL_STATUSES.has(s.evaluation.status)),
   );
 }
+
+type QuestionState = "unanswered" | "evaluating" | "passed" | "partial" | "failed";
+
+function questionState(q: ExamQuestion): QuestionState {
+  const latest = q.submissions[0];
+  if (!latest) return "unanswered";
+  const evaluation = latest.evaluation;
+  if (!evaluation || evaluation.status === "PENDING" || evaluation.status === "RUNNING") {
+    return latest.status === "FAILED" ? "failed" : "evaluating";
+  }
+  if (evaluation.status === "FAILED" || evaluation.status === "CANCELLED") return "failed";
+  if (evaluation.testsTotal > 0 && evaluation.testsPassed === evaluation.testsTotal)
+    return "passed";
+  return evaluation.testsPassed > 0 ? "partial" : "failed";
+}
+
+const STATE_DOT: Record<QuestionState, string> = {
+  unanswered: "bg-neutral-300",
+  evaluating: "bg-blue-400 animate-pulse",
+  passed: "bg-green-500",
+  partial: "bg-amber-500",
+  failed: "bg-red-500",
+};
 
 export function ExamPage() {
   const { sessionId } = useParams();
@@ -103,7 +128,12 @@ type SaveStatus =
   | { kind: "unsaved" }
   | { kind: "saving" }
   | { kind: "saved"; at: number }
+  | { kind: "offline" } // network hiccup - will retry automatically
   | { kind: "error"; message: string };
+
+function isNetworkError(err: unknown): boolean {
+  return err instanceof ApiClientError && err.isNetwork;
+}
 
 function ExamRunner({
   sessionId,
@@ -123,6 +153,7 @@ function ExamRunner({
   const [submitting, setSubmitting] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [socketLive, setSocketLive] = useState(false);
+  const [slowEval, setSlowEval] = useState(false);
   const [, forceTick] = useState(0);
 
   const questions = view.questions;
@@ -161,6 +192,8 @@ function ExamRunner({
       { sessionId },
       {
         onStatus: setSocketLive,
+        // Re-fetch once on every (re)subscribe so a reconnect closes any gap.
+        onReady: () => void refresh(),
         onSessionChanged: () => void refresh(),
         onViolation: (violationCount) =>
           setView((v) => ({ ...v, integrity: { ...v.integrity, violationCount } })),
@@ -181,6 +214,28 @@ function ExamRunner({
     const id = window.setInterval(() => void refresh(), interval);
     return () => window.clearInterval(id);
   }, [locked, socketLive, evaluationPending, refresh]);
+
+  // "Still working on it" reassurance if an evaluation runs long.
+  useEffect(() => {
+    if (!evaluationPending) {
+      setSlowEval(false);
+      return;
+    }
+    const id = window.setTimeout(() => setSlowEval(true), SLOW_EVAL_NOTICE_MS);
+    return () => window.clearTimeout(id);
+  }, [evaluationPending]);
+
+  // Warn before a refresh / tab close swallows unsaved edits.
+  const unsaved = save.kind === "unsaved" || save.kind === "offline";
+  useEffect(() => {
+    if (locked || !unsaved) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [locked, unsaved]);
 
   // Non-invasive integrity monitor: focus + fullscreen only.
   const reportViolation = useCallback(
@@ -214,8 +269,14 @@ function ExamRunner({
         setView((v) => ({ ...v, timing: result.timing }));
         setSave({ kind: "saved", at: Date.now() });
       } catch (err) {
-        if (err instanceof ApiClientError && err.status === 409) {
-          setSave({ kind: "error", message: "Session closed - your last save is safe." });
+        if (isNetworkError(err)) {
+          // Keep the edit "dirty" so the retry effect saves it once we are back.
+          setSave({ kind: "offline" });
+        } else if (err instanceof ApiClientError && err.status === 409) {
+          setSave({
+            kind: "error",
+            message: "This session is closed - your last saved version is safe.",
+          });
           void refresh();
         } else {
           setSave({ kind: "error", message: messageFromError(err) });
@@ -225,14 +286,17 @@ function ExamRunner({
     [sessionId, refresh],
   );
 
-  // Debounced autosave of the current question.
+  // Debounced autosave, plus automatic retry after a network hiccup.
   const editorRef = useRef(editor);
   editorRef.current = editor;
   useEffect(() => {
-    if (locked || save.kind !== "unsaved") return;
+    if (locked) return;
+    const delay =
+      save.kind === "unsaved" ? AUTOSAVE_DELAY_MS : save.kind === "offline" ? AUTOSAVE_RETRY_MS : 0;
+    if (delay === 0) return;
     const id = window.setTimeout(() => {
       void persistDraft(currentId, editorRef.current);
-    }, AUTOSAVE_DELAY_MS);
+    }, delay);
     return () => window.clearTimeout(id);
   }, [locked, save.kind, currentId, editor.code, editor.language, persistDraft]);
 
@@ -253,14 +317,16 @@ function ExamRunner({
 
   async function goToQuestion(index: number) {
     if (index === currentIndex) return;
-    if (!locked && save.kind === "unsaved") await persistDraft(currentId, editorRef.current);
+    if (!locked && (save.kind === "unsaved" || save.kind === "offline")) {
+      await persistDraft(currentId, editorRef.current);
+    }
     setCurrentIndex(index);
     setSubmitError(null);
     setSave({ kind: "idle" });
   }
 
   async function submitCurrent() {
-    if (!current) return;
+    if (!current || submitting) return;
     setSubmitError(null);
     setSubmitting(true);
     try {
@@ -272,8 +338,12 @@ function ExamRunner({
       setSave({ kind: "saved", at: Date.now() });
       await refresh();
     } catch (err) {
-      if (err instanceof ApiClientError && err.status === 409) {
-        setSubmitError("The session is closed - submissions are no longer accepted.");
+      if (isNetworkError(err)) {
+        setSubmitError(
+          "Couldn't reach the server to submit. Your code is saved as a draft - check your connection and try again.",
+        );
+      } else if (err instanceof ApiClientError && err.status === 409) {
+        setSubmitError("This session is closed - submissions are no longer accepted.");
         void refresh();
       } else {
         setSubmitError(messageFromError(err));
@@ -286,7 +356,9 @@ function ExamRunner({
   async function finishExam() {
     setFinishing(true);
     try {
-      if (!locked && save.kind === "unsaved") await persistDraft(currentId, editorRef.current);
+      if (!locked && (save.kind === "unsaved" || save.kind === "offline")) {
+        await persistDraft(currentId, editorRef.current);
+      }
       setView(await studentApi.finishSession(sessionId));
     } catch (err) {
       setSubmitError(messageFromError(err));
@@ -301,49 +373,75 @@ function ExamRunner({
     );
   }
 
+  const answeredCount = questions.filter((q) => q.submissions.length > 0).length;
+  const assessmentClosed = view.assessmentStatus === "CLOSED";
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <Link to="/student" className="text-xs text-blue-700 hover:underline">
-            ← Your assessments
-          </Link>
-          <h1 className="text-lg font-semibold">{view.assessmentTitle}</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <LiveDot connected={socketLive} />
-          <Timer remaining={remaining} locked={locked} />
-          {!locked ? (
-            <Button variant="secondary" onClick={() => void requestExamFullscreen()}>
-              Fullscreen
+      <div className="sticky top-0 z-20 -mx-4 border-b border-neutral-200 bg-neutral-50/90 px-4 py-2 backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="min-w-0">
+            <Link to="/student" className="text-xs text-blue-700 hover:underline">
+              ← Your assessments
+            </Link>
+            <h1 className="truncate text-base font-semibold">{view.assessmentTitle}</h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="hidden text-xs text-neutral-500 sm:inline">
+              {answeredCount}/{questions.length} submitted
+            </span>
+            <IntegrityChip summary={view.integrity} />
+            <LiveDot connected={socketLive} />
+            <Timer remaining={remaining} locked={locked} />
+            {!locked ? (
+              <Button size="sm" variant="secondary" onClick={() => void requestExamFullscreen()}>
+                Fullscreen
+              </Button>
+            ) : null}
+            <Button
+              size="sm"
+              variant="danger"
+              loading={finishing}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Finish and submit the whole assessment? You will not be able to reopen it.",
+                  )
+                ) {
+                  void finishExam();
+                }
+              }}
+            >
+              {finishing ? "Finishing…" : "Finish exam"}
             </Button>
-          ) : null}
-          <Button
-            variant="secondary"
-            disabled={finishing}
-            onClick={() => {
-              if (window.confirm("Finish and submit the whole assessment? You cannot reopen it.")) {
-                void finishExam();
-              }
-            }}
-          >
-            {finishing ? "Finishing…" : "Finish exam"}
-          </Button>
+          </div>
         </div>
       </div>
 
       {locked ? (
-        <Alert kind={view.timing.status === "EXPIRED" ? "error" : "info"}>
-          {view.timing.status === "EXPIRED"
-            ? "Time is up. Your saved work is preserved; no more changes can be made."
-            : `This session is ${view.timing.status}.`}
+        <Alert
+          kind={view.timing.status === "EXPIRED" ? "warning" : "info"}
+          title={
+            view.timing.status === "EXPIRED"
+              ? "Time is up"
+              : `Session ${view.timing.status.toLowerCase()}`
+          }
+        >
+          Your saved work is preserved. No more changes can be made; your submissions are still
+          being graded.
+        </Alert>
+      ) : assessmentClosed ? (
+        <Alert kind="warning" title="Your instructor closed this assessment">
+          You can finish and submit your current work, but it may not be graded further.
         </Alert>
       ) : null}
 
       {view.integrity.warning ? (
-        <Alert kind={view.integrity.violationCount >= 3 ? "error" : "info"}>
+        <Alert kind={view.integrity.violationCount >= 3 ? "error" : "warning"} title="Exam focus">
           {view.integrity.warning}
         </Alert>
+      ) : !locked ? (
+        <IntegrityIntro />
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-[200px_1fr]">
@@ -393,13 +491,20 @@ function ExamRunner({
                 </div>
               ) : null}
 
-              <div className="mt-3 flex items-center justify-between">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <SubmissionList question={current} />
-                <Button disabled={locked || submitting} onClick={() => void submitCurrent()}>
+                <Button loading={submitting} disabled={locked} onClick={() => void submitCurrent()}>
                   {submitting ? "Submitting…" : "Submit this question"}
                 </Button>
               </div>
             </Card>
+
+            {slowEval ? (
+              <Alert kind="info">
+                Grading is taking longer than usual - it will update here automatically when it
+                finishes.
+              </Alert>
+            ) : null}
 
             <ResultPanel key={`result-${currentId}`} question={current} />
 
@@ -427,7 +532,7 @@ function LiveDot({ connected }: { connected: boolean }) {
       title={
         connected
           ? "Live updates connected"
-          : "Live updates unavailable - falling back to periodic refresh"
+          : "Live updates unavailable - the page still refreshes periodically"
       }
     >
       <span
@@ -435,21 +540,59 @@ function LiveDot({ connected }: { connected: boolean }) {
           connected ? "bg-green-500" : "bg-neutral-300"
         }`}
       />
-      {connected ? "Live" : "Offline"}
+      <span className="hidden sm:inline">{connected ? "Live" : "Offline"}</span>
     </span>
+  );
+}
+
+function IntegrityChip({ summary }: { summary: ExamSessionView["integrity"] }) {
+  const count = summary.violationCount;
+  const tone = count === 0 ? "neutral" : count >= 3 ? "danger" : "warning";
+  return (
+    <Badge tone={tone}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      Focus {count === 0 ? "OK" : count}
+    </Badge>
+  );
+}
+
+function IntegrityIntro() {
+  const [show, setShow] = useState(true);
+  if (!show) return null;
+  return (
+    <Alert kind="info" title="Exam integrity">
+      <div className="flex items-start justify-between gap-3">
+        <span>
+          Please stay in this window and use fullscreen. Switching tabs or leaving fullscreen is
+          recorded and shown to your instructor - it is not a hard block.
+        </span>
+        <button
+          className="shrink-0 text-xs font-medium text-blue-700 hover:underline"
+          onClick={() => setShow(false)}
+        >
+          Got it
+        </button>
+      </div>
+    </Alert>
   );
 }
 
 function Timer({ remaining, locked }: { remaining: number | null; locked: boolean }) {
   if (remaining === null) {
-    return <span className="text-sm text-neutral-500">No time limit</span>;
+    return (
+      <span className="rounded-md bg-neutral-100 px-2 py-1 text-xs text-neutral-500">No limit</span>
+    );
   }
+  const warn = !locked && remaining <= 300;
   const danger = !locked && remaining <= 60;
+  const cls = danger
+    ? "bg-red-100 text-red-800 ring-1 ring-red-300"
+    : warn
+      ? "bg-amber-100 text-amber-900"
+      : "bg-neutral-100 text-neutral-700";
   return (
     <span
-      className={`rounded-md px-2 py-1 font-mono text-sm ${
-        danger ? "bg-red-100 text-red-800" : "bg-neutral-100 text-neutral-700"
-      }`}
+      className={`rounded-md px-2 py-1 font-mono text-sm tabular-nums ${cls} ${danger ? "animate-pulse" : ""}`}
       title="Time remaining (server clock)"
     >
       {locked && remaining === 0 ? "00:00" : formatClock(remaining)}
@@ -458,14 +601,6 @@ function Timer({ remaining, locked }: { remaining: number | null; locked: boolea
 }
 
 function SaveIndicator({ status }: { status: SaveStatus }) {
-  const text = {
-    idle: "",
-    unsaved: "Unsaved changes",
-    saving: "Saving…",
-    saved: "",
-    error: "",
-  }[status.kind];
-
   if (status.kind === "saved") {
     return (
       <span className="text-xs font-normal text-green-600">
@@ -473,10 +608,19 @@ function SaveIndicator({ status }: { status: SaveStatus }) {
       </span>
     );
   }
+  if (status.kind === "saving") {
+    return <span className="text-xs font-normal text-neutral-400">Saving…</span>;
+  }
+  if (status.kind === "offline") {
+    return <span className="text-xs font-normal text-amber-600">Offline – will retry</span>;
+  }
+  if (status.kind === "unsaved") {
+    return <span className="text-xs font-normal text-neutral-400">Unsaved changes</span>;
+  }
   if (status.kind === "error") {
     return <span className="text-xs font-normal text-red-600">{status.message}</span>;
   }
-  return <span className="text-xs font-normal text-neutral-400">{text}</span>;
+  return null;
 }
 
 function QuestionNav({
@@ -491,28 +635,29 @@ function QuestionNav({
   onSelect: (index: number) => void;
 }) {
   return (
-    <nav className="space-y-1">
+    <nav className="flex gap-2 overflow-x-auto md:flex-col md:overflow-visible">
       {questions.map((q, index) => {
-        const answered = q.submissions.length > 0;
         const active = index === currentIndex;
+        const state = questionState(q);
         return (
           <button
             key={q.id}
             onClick={() => onSelect(index)}
-            className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm ${
+            className={`flex w-full min-w-[9rem] items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition md:min-w-0 ${
               active
-                ? "border-blue-500 bg-blue-50 text-blue-800"
+                ? "border-blue-500 bg-blue-50 text-blue-900"
                 : "border-neutral-200 bg-white hover:bg-neutral-50"
             }`}
+            title={state}
           >
+            <span className={`h-2 w-2 shrink-0 rounded-full ${STATE_DOT[state]}`} />
             <span className="truncate">
               {index + 1}. {q.title}
             </span>
-            {answered ? <span className="text-xs text-green-600">✓</span> : null}
           </button>
         );
       })}
-      <p className="px-1 pt-2 text-xs text-neutral-400">
+      <p className="hidden px-1 pt-1 text-xs text-neutral-400 md:block">
         {view.questions.filter((q) => q.submissions.length > 0).length}/{questions.length} submitted
       </p>
     </nav>
@@ -855,14 +1000,52 @@ function EndScreen({
 }) {
   const submitted = view.questions.filter((q) => q.submissions.length > 0).length;
   return (
-    <div className="mx-auto max-w-md space-y-4 py-10 text-center">
-      <h1 className="text-xl font-semibold">{title}</h1>
-      <p className="text-sm text-neutral-600">
-        You submitted {submitted} of {view.questions.length} question
-        {view.questions.length === 1 ? "" : "s"}. Your work is saved and your submissions are being
-        graded automatically.
-      </p>
-      <Button onClick={onDone}>Back to your assessments</Button>
+    <div className="mx-auto max-w-lg space-y-4 py-8">
+      <div className="text-center">
+        <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-green-700">
+          ✓
+        </div>
+        <h1 className="text-xl font-semibold">{title}</h1>
+        <p className="mt-1 text-sm text-neutral-600">
+          You submitted {submitted} of {view.questions.length} question
+          {view.questions.length === 1 ? "" : "s"}. Your work is saved and is being graded
+          automatically.
+        </p>
+      </div>
+
+      <Card title="Your submissions">
+        <ul className="divide-y divide-neutral-100 text-sm">
+          {view.questions.map((q, i) => {
+            const latest = q.submissions[0] ?? null;
+            const state = questionState(q);
+            return (
+              <li key={q.id} className="flex items-center justify-between gap-2 py-2">
+                <span className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${STATE_DOT[state]}`} />
+                  <span className="truncate">
+                    {i + 1}. {q.title}
+                  </span>
+                </span>
+                <span className="text-xs text-neutral-500">
+                  {!latest
+                    ? "Not submitted"
+                    : latest.evaluation && latest.evaluation.status === "COMPLETED"
+                      ? `${latest.evaluation.testsPassed}/${latest.evaluation.testsTotal} tests · ${latest.evaluation.score ?? 0}/${latest.evaluation.maxScore ?? 0}`
+                      : state === "evaluating"
+                        ? "Grading…"
+                        : state === "failed"
+                          ? "Could not grade"
+                          : "Submitted"}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+
+      <div className="text-center">
+        <Button onClick={onDone}>Back to your assessments</Button>
+      </div>
     </div>
   );
 }

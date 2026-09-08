@@ -24,9 +24,9 @@ Services are independent packages with explicit boundaries — see
 (`routes → controller → service → repository`) that reaches PostgreSQL only through the
 `@gradevision/database` package; the domain model is in
 [docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md). Implemented so far: first-stage JWT auth,
-the **instructor assessment-authoring** workflow (courses/sections, assessments, coding
-questions, VISIBLE/HIDDEN test cases, rubric criteria), and the **student
-assessment-taking** workflow (discovery, timed exam sessions, autosaving Monaco editor,
+the **instructor assessment-authoring** workflow (courses/sections, assessments with a
+DRAFT -> ACTIVE -> CLOSED lifecycle, coding questions, VISIBLE/HIDDEN test cases, rubric
+criteria), and the **student assessment-taking** workflow (discovery, timed exam sessions, autosaving Monaco editor,
 per-question submissions), the **automated evaluation pipeline** (async
 Judge0-backed execution of visible + hidden tests, deterministic rubric/semantic
 grading, student + instructor results), **progressive AI hints** (static stages
@@ -78,20 +78,20 @@ pnpm db:seed                  # load the deterministic development dataset
 
 ## Development commands
 
-| Command                              | Description                                       |
-| ------------------------------------ | ------------------------------------------------- |
-| `pnpm dev`                           | Run every package's `dev` task in parallel        |
-| `pnpm --filter @gradevision/web dev` | Run only the web client (http://localhost:5173)   |
-| `pnpm --filter @gradevision/api dev` | Run only the API (http://localhost:4000/api/v1)   |
-| `pnpm build`                         | Build `packages/*` then `apps/*` and `services/*` |
-| `pnpm typecheck`                     | Run TypeScript checks across the workspace        |
-| `pnpm lint`                          | Run ESLint across the workspace                   |
-| `pnpm test`                          | Run tests (vitest; `apps/api` auth suite)         |
-| `pnpm format`                        | Format the repository with Prettier               |
-| `pnpm db:generate`                   | Regenerate the Prisma client                      |
-| `pnpm db:migrate`                    | Create/apply a development migration              |
-| `pnpm db:seed`                       | Seed the development dataset                      |
-| `pnpm db:studio`                     | Open Prisma Studio                                |
+| Command                              | Description                                          |
+| ------------------------------------ | ---------------------------------------------------- |
+| `pnpm dev`                           | Run every package's `dev` task in parallel           |
+| `pnpm --filter @gradevision/web dev` | Run only the web client (http://localhost:5173)      |
+| `pnpm --filter @gradevision/api dev` | Run only the API (http://localhost:4000/api/v1)      |
+| `pnpm build`                         | Build `packages/*` then `apps/*` and `services/*`    |
+| `pnpm typecheck`                     | Run TypeScript checks across the workspace           |
+| `pnpm lint`                          | Run ESLint across the workspace                      |
+| `pnpm test`                          | Run all vitest suites (api, web, packages, services) |
+| `pnpm format`                        | Format the repository with Prettier                  |
+| `pnpm db:generate`                   | Regenerate the Prisma client                         |
+| `pnpm db:migrate`                    | Create/apply a development migration                 |
+| `pnpm db:seed`                       | Seed the development dataset                         |
+| `pnpm db:studio`                     | Open Prisma Studio                                   |
 
 Copy `.env.example` to `.env` and adjust values as needed. Never commit a populated `.env`.
 

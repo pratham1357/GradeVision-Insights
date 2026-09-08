@@ -1,8 +1,17 @@
+import type { AssessmentStatus } from "@gradevision/shared";
 import { Link } from "react-router-dom";
 
 import { instructorApi } from "../lib/instructor-api";
 import { useApi } from "../lib/use-api";
-import { Alert, Badge, Button, Card, EmptyState, Spinner } from "../components/ui";
+import { Alert, Badge, Button, Card, EmptyState, PageHeader, Spinner } from "../components/ui";
+
+const STATUS_TONE: Record<AssessmentStatus, "neutral" | "info" | "success" | "warning"> = {
+  DRAFT: "neutral",
+  SCHEDULED: "info",
+  ACTIVE: "success",
+  CLOSED: "warning",
+  ARCHIVED: "neutral",
+};
 
 export function DashboardPage() {
   const courses = useApi(() => instructorApi.listCourses(), []);
@@ -10,24 +19,29 @@ export function DashboardPage() {
   const questions = useApi(() => instructorApi.listQuestions(), []);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Dashboard</h1>
-        <div className="flex gap-2">
-          <Link to="/questions/new">
-            <Button variant="secondary">New question</Button>
-          </Link>
-          <Link to="/assessments/new">
-            <Button>New assessment</Button>
-          </Link>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Dashboard"
+        subtitle="Author questions and assessments, then monitor results live."
+        actions={
+          <>
+            <Link to="/questions/new">
+              <Button variant="secondary">New question</Button>
+            </Link>
+            <Link to="/assessments/new">
+              <Button>New assessment</Button>
+            </Link>
+          </>
+        }
+      />
 
       <Card title="Your courses & sections">
         {courses.loading ? (
           <Spinner />
         ) : courses.error ? (
-          <Alert kind="error">{courses.error}</Alert>
+          <Alert kind="error" onRetry={courses.reload}>
+            {courses.error}
+          </Alert>
         ) : !courses.data?.length ? (
           <EmptyState>You are not assigned to any sections yet.</EmptyState>
         ) : (
@@ -59,52 +73,56 @@ export function DashboardPage() {
         {assessments.loading ? (
           <Spinner />
         ) : assessments.error ? (
-          <Alert kind="error">{assessments.error}</Alert>
+          <Alert kind="error" onRetry={assessments.reload}>
+            {assessments.error}
+          </Alert>
         ) : !assessments.data?.length ? (
           <EmptyState>No assessments yet. Create one to get started.</EmptyState>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="text-left text-xs uppercase text-neutral-400">
-              <tr>
-                <th className="pb-2">Title</th>
-                <th className="pb-2">Section</th>
-                <th className="pb-2">Status</th>
-                <th className="pb-2 text-right">Questions</th>
-                <th className="pb-2 text-right">Points</th>
-                <th className="pb-2 text-right">Results</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assessments.data.map((a) => (
-                <tr key={a.id} className="border-t border-neutral-100">
-                  <td className="py-2">
-                    <Link
-                      className="font-medium text-blue-700 hover:underline"
-                      to={`/assessments/${a.id}`}
-                    >
-                      {a.title}
-                    </Link>
-                  </td>
-                  <td className="py-2 text-neutral-500">
-                    {a.section ? `${a.section.courseCode} / ${a.section.name}` : "—"}
-                  </td>
-                  <td className="py-2">
-                    <Badge>{a.status}</Badge>
-                  </td>
-                  <td className="py-2 text-right text-neutral-500">{a.questionCount}</td>
-                  <td className="py-2 text-right text-neutral-500">{a.totalPoints}</td>
-                  <td className="py-2 text-right">
-                    <Link
-                      className="text-xs text-blue-700 hover:underline"
-                      to={`/assessments/${a.id}/results`}
-                    >
-                      Results
-                    </Link>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs uppercase tracking-wide text-neutral-400">
+                <tr>
+                  <th className="pb-2 pr-3">Title</th>
+                  <th className="pb-2 pr-3">Section</th>
+                  <th className="pb-2 pr-3">Status</th>
+                  <th className="pb-2 pr-3 text-right">Questions</th>
+                  <th className="pb-2 pr-3 text-right">Points</th>
+                  <th className="pb-2 text-right">Monitor</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {assessments.data.map((a) => (
+                  <tr key={a.id} className="border-t border-neutral-100">
+                    <td className="py-2 pr-3">
+                      <Link
+                        className="font-medium text-blue-700 hover:underline"
+                        to={`/assessments/${a.id}`}
+                      >
+                        {a.title}
+                      </Link>
+                    </td>
+                    <td className="py-2 pr-3 text-neutral-500">
+                      {a.section ? `${a.section.courseCode} / ${a.section.name}` : "—"}
+                    </td>
+                    <td className="py-2 pr-3">
+                      <Badge tone={STATUS_TONE[a.status]}>{a.status}</Badge>
+                    </td>
+                    <td className="py-2 pr-3 text-right text-neutral-500">{a.questionCount}</td>
+                    <td className="py-2 pr-3 text-right text-neutral-500">{a.totalPoints}</td>
+                    <td className="py-2 text-right">
+                      <Link
+                        className="text-xs font-medium text-blue-700 hover:underline"
+                        to={`/assessments/${a.id}/results`}
+                      >
+                        Results
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
 
@@ -112,13 +130,15 @@ export function DashboardPage() {
         {questions.loading ? (
           <Spinner />
         ) : questions.error ? (
-          <Alert kind="error">{questions.error}</Alert>
+          <Alert kind="error" onRetry={questions.reload}>
+            {questions.error}
+          </Alert>
         ) : !questions.data?.length ? (
           <EmptyState>No questions yet.</EmptyState>
         ) : (
           <ul className="divide-y divide-neutral-100 text-sm">
             {questions.data.map((q) => (
-              <li key={q.id} className="flex items-center justify-between py-2">
+              <li key={q.id} className="flex items-center justify-between gap-2 py-2">
                 <Link
                   className="font-medium text-blue-700 hover:underline"
                   to={`/questions/${q.id}`}

@@ -14,12 +14,21 @@ export class ApiClientError extends Error {
     this.status = status;
     this.code = code;
   }
+
+  /** The request never reached the server (offline, DNS, CORS, timeout). */
+  get isNetwork(): boolean {
+    return this.status === 0;
+  }
 }
+
+const NETWORK_MESSAGE =
+  "Can't reach the server right now. Check your connection - your work is kept locally and you can retry.";
 
 /**
  * Minimal API client: prefixes `/api/v1`, attaches the bearer token, unwraps the
- * `{ data }` / `{ error }` envelope. Kept tiny on purpose - swap the auth header
- * for cookie credentials here when the backend moves to httpOnly cookies.
+ * `{ data }` / `{ error }` envelope. A failed `fetch` (offline / DNS / CORS) is
+ * normalised to a friendly `ApiClientError` with `status === 0`, never a raw
+ * `TypeError`. Server error bodies are shown as-is (the API never leaks internals).
  */
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = tokenStorage.get();
@@ -28,15 +37,28 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  } catch {
+    throw new ApiClientError(0, "NETWORK", NETWORK_MESSAGE);
+  }
+
   const payload: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
     const error = (payload as ApiErrorBody | null)?.error;
+    if (response.status === 502 || response.status === 503 || response.status === 504) {
+      throw new ApiClientError(
+        response.status,
+        error?.code ?? "SERVICE_UNAVAILABLE",
+        error?.message ?? "That service is temporarily unavailable. Please try again shortly.",
+      );
+    }
     throw new ApiClientError(
       response.status,
       error?.code ?? "UNKNOWN",
-      error?.message ?? `Request failed with status ${response.status}`,
+      error?.message ?? `Request failed (${response.status}).`,
     );
   }
 

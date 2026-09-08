@@ -27,6 +27,28 @@ export type EvaluationRunWithResults = Prisma.EvaluationRunGetPayload<typeof run
 
 const PASSING: TestCaseResultStatus = "PASSED";
 
+/**
+ * Curated, client-safe text for a failed evaluation. The evaluator's raw
+ * `errorMessage` (which can contain provider / stack details) is NEVER sent to
+ * a student or instructor - it stays in the server logs. Only the stable
+ * machine `type` and one of these sentences are exposed.
+ */
+const FAILURE_MESSAGES: Record<string, string> = {
+  NO_TEST_CASES: "This question has no active test cases, so it could not be graded automatically.",
+  EXECUTION_UNAVAILABLE:
+    "Automated grading is temporarily unavailable. Your instructor can still review this submission.",
+  EVALUATOR_ERROR:
+    "The automated grader could not finish this submission. Your instructor can still review it.",
+  TIMEOUT: "The automated grader timed out on this submission.",
+};
+
+function safeFailureMessage(errorType: string | null): string {
+  return (
+    (errorType && FAILURE_MESSAGES[errorType]) ??
+    "The automated grader could not finish this submission. Your instructor can still review it."
+  );
+}
+
 function toNumber(value: Prisma.Decimal | number | null): number | null {
   return value === null ? null : Number(value);
 }
@@ -115,8 +137,8 @@ function buildFeedback(run: EvaluationRunWithResults, rubric: RubricBreakdownIte
         : `${passed} of ${total} test cases passed.`,
     );
   }
-  if (run.errorMessage && run.status === "FAILED") {
-    feedback.push(run.errorMessage);
+  if (run.status === "FAILED") {
+    feedback.push(safeFailureMessage(run.errorType));
   }
   for (const item of rubric) {
     if (item.pointsAwarded < item.maxPoints && item.notes) {
@@ -146,8 +168,10 @@ export function toEvaluationDetail(
     error:
       run.status === "FAILED"
         ? {
+            // `type` is a stable machine code (safe); `message` is curated -
+            // the evaluator's raw errorMessage is never surfaced to clients.
             type: run.errorType ?? "EVALUATION_FAILED",
-            message: run.errorMessage ?? "Evaluation failed",
+            message: safeFailureMessage(run.errorType),
           }
         : null,
     completedAt: run.completedAt?.toISOString() ?? null,

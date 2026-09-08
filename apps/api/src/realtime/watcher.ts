@@ -27,20 +27,29 @@ export interface WatcherDb {
 const realDb: WatcherDb = {
   async sessionActivity(sessionIds) {
     if (sessionIds.length === 0) return [];
-    const runs = await prisma.evaluationRun.findMany({
-      where: { submission: { examSessionId: { in: sessionIds } } },
-      select: { updatedAt: true, submission: { select: { examSessionId: true } } },
-    });
+    const [runs, sessions] = await Promise.all([
+      prisma.evaluationRun.findMany({
+        where: { submission: { examSessionId: { in: sessionIds } } },
+        select: { updatedAt: true, submission: { select: { examSessionId: true } } },
+      }),
+      // Session row itself (status change) + its assessment (instructor edited it).
+      prisma.examSession.findMany({
+        where: { id: { in: sessionIds } },
+        select: { id: true, updatedAt: true, assessment: { select: { updatedAt: true } } },
+      }),
+    ]);
     const latest = new Map<string, number>();
-    for (const run of runs) {
-      const key = run.submission.examSessionId;
-      latest.set(key, Math.max(latest.get(key) ?? 0, run.updatedAt.getTime()));
+    const bump = (key: string, ms: number) => latest.set(key, Math.max(latest.get(key) ?? 0, ms));
+    for (const run of runs) bump(run.submission.examSessionId, run.updatedAt.getTime());
+    for (const sn of sessions) {
+      bump(sn.id, sn.updatedAt.getTime());
+      bump(sn.id, sn.assessment.updatedAt.getTime());
     }
     return [...latest].map(([sessionId, at]) => ({ sessionId, at }));
   },
   async assessmentActivity(assessmentIds) {
     if (assessmentIds.length === 0) return [];
-    const [runs, violations] = await Promise.all([
+    const [runs, violations, assessments] = await Promise.all([
       prisma.evaluationRun.findMany({
         where: { submission: { examSession: { assessmentId: { in: assessmentIds } } } },
         select: {
@@ -52,11 +61,24 @@ const realDb: WatcherDb = {
         where: { examSession: { assessmentId: { in: assessmentIds } } },
         select: { occurredAt: true, examSession: { select: { assessmentId: true } } },
       }),
+      // The assessment row itself + any of its sessions changing (start / submit).
+      prisma.assessment.findMany({
+        where: { id: { in: assessmentIds } },
+        select: {
+          id: true,
+          updatedAt: true,
+          examSessions: { select: { updatedAt: true }, orderBy: { updatedAt: "desc" }, take: 1 },
+        },
+      }),
     ]);
     const latest = new Map<string, number>();
     const bump = (key: string, ms: number) => latest.set(key, Math.max(latest.get(key) ?? 0, ms));
     for (const run of runs) bump(run.submission.examSession.assessmentId, run.updatedAt.getTime());
     for (const v of violations) bump(v.examSession.assessmentId, v.occurredAt.getTime());
+    for (const a of assessments) {
+      bump(a.id, a.updatedAt.getTime());
+      if (a.examSessions[0]) bump(a.id, a.examSessions[0].updatedAt.getTime());
+    }
     return [...latest].map(([assessmentId, at]) => ({ assessmentId, at }));
   },
 };

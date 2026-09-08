@@ -2,28 +2,44 @@ import type { ViolationType } from "@gradevision/shared";
 import { useEffect, useRef } from "react";
 
 /** Collapse the blur/visibility burst a single tab-switch fires into one event. */
-const COOLDOWN_MS = 1_200;
+export const COOLDOWN_MS = 1_200;
+
+/**
+ * Stateful debouncer for integrity signals. A tab-switch fires `blur` then
+ * `visibilitychange` in quick succession - both map to "left the exam", so only
+ * the first within {@link COOLDOWN_MS} is reported. Pure and unit-testable.
+ */
+export function createIntegrityDebouncer(cooldownMs = COOLDOWN_MS, now: () => number = Date.now) {
+  let lastAt = Number.NEGATIVE_INFINITY;
+  return {
+    /** Returns true if this signal should be recorded now. */
+    shouldRecord(): boolean {
+      const t = now();
+      if (t - lastAt < cooldownMs) return false;
+      lastAt = t;
+      return true;
+    },
+  };
+}
 
 /**
  * Lightweight, non-invasive integrity monitor. Watches only page focus and
  * fullscreen state - no camera, microphone, screen capture, or keystroke
- * logging. Calls `report` at most once per {@link COOLDOWN_MS}.
+ * logging. Reports at most once per {@link COOLDOWN_MS}.
  */
 export function useIntegrityMonitor(
   enabled: boolean,
   report: (type: ViolationType, note?: string) => void,
 ): void {
-  const lastAt = useRef(0);
   const reportRef = useRef(report);
   reportRef.current = report;
 
   useEffect(() => {
     if (!enabled) return;
+    const debouncer = createIntegrityDebouncer();
 
-    const fire = (type: ViolationType, note?: string) => {
-      const now = Date.now();
-      if (now - lastAt.current < COOLDOWN_MS) return;
-      lastAt.current = now;
+    const fire = (type: ViolationType, note: string) => {
+      if (!debouncer.shouldRecord()) return;
       reportRef.current(type, note);
     };
 

@@ -32,8 +32,9 @@ export const updateAssessmentSchema = z
     title,
     description,
     durationMinutes,
-    // The instructor-editable status transitions for this MVP (never ACTIVE).
-    status: z.enum(["DRAFT", "SCHEDULED", "CLOSED", "ARCHIVED"]),
+    // Instructor-editable status transitions. Legal transitions are enforced
+    // in the service (see ALLOWED_TRANSITIONS).
+    status: z.enum(["DRAFT", "SCHEDULED", "ACTIVE", "CLOSED", "ARCHIVED"]),
   })
   .partial()
   .refine((body) => Object.keys(body).length > 0, "At least one field is required");

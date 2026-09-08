@@ -8,7 +8,7 @@ import type {
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 
-import { Alert, Badge, Card, Spinner } from "../components/ui";
+import { Alert, Badge, Button, Card, PageHeader, Spinner } from "../components/ui";
 import { instructorApi } from "../lib/instructor-api";
 import { connectRealtime } from "../lib/realtime";
 import { messageFromError, useApi } from "../lib/use-api";
@@ -75,16 +75,29 @@ function Results({ assessmentId }: { assessmentId: string }) {
     [assessmentId],
   );
   const [selected, setSelected] = useState<InstructorResultRow | null>(null);
+  const [live, setLive] = useState(false);
 
   useEffect(() => {
-    return connectRealtime({ assessmentId }, { onAssessmentChanged: () => reload() });
+    // Realtime nudge; a slow poll below is the fallback when the socket is down.
+    return connectRealtime(
+      { assessmentId },
+      { onStatus: setLive, onReady: () => reload(), onAssessmentChanged: () => reload() },
+    );
   }, [assessmentId, reload]);
 
-  if (loading) return <Spinner label="Loading results…" />;
+  useEffect(() => {
+    if (live) return;
+    const id = window.setInterval(() => reload(), 15_000);
+    return () => window.clearInterval(id);
+  }, [live, reload]);
+
+  if (loading && !data) return <Spinner label="Loading results…" />;
   if (error || !data) {
     return (
       <div className="space-y-3">
-        <Alert kind="error">{error ?? "Results not available"}</Alert>
+        <Alert kind="error" onRetry={reload}>
+          {error ?? "Results not available"}
+        </Alert>
         <Link to="/dashboard" className="text-sm text-blue-700 hover:underline">
           ← Back to dashboard
         </Link>
@@ -94,16 +107,27 @@ function Results({ assessmentId }: { assessmentId: string }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <Link to={`/assessments/${assessmentId}`} className="text-xs text-blue-700 hover:underline">
-          ← {data.assessmentTitle}
-        </Link>
-        <h1 className="text-lg font-semibold">Results & monitoring</h1>
-        <p className="text-sm text-neutral-500">
-          {data.stats.startedCount} of {data.stats.totalStudents} enrolled students have started ·{" "}
-          {data.stats.gradedCount} graded · updates live.
-        </p>
-      </div>
+      <PageHeader
+        back={
+          <Link
+            to={`/assessments/${assessmentId}`}
+            className="text-xs text-blue-700 hover:underline"
+          >
+            ← {data.assessmentTitle}
+          </Link>
+        }
+        title="Results & monitoring"
+        subtitle={`${data.stats.startedCount} of ${data.stats.totalStudents} students started · ${data.stats.gradedCount} graded`}
+        actions={
+          <span className="flex items-center gap-1.5 text-xs text-neutral-400">
+            <span className={`h-2 w-2 rounded-full ${live ? "bg-green-500" : "bg-neutral-300"}`} />
+            {live ? "Live" : "Auto-refresh"}
+            <Button size="sm" variant="ghost" onClick={reload}>
+              Refresh
+            </Button>
+          </span>
+        }
+      />
 
       <StatsRow stats={data.stats} />
 
@@ -139,8 +163,24 @@ function Results({ assessmentId }: { assessmentId: string }) {
                       <div className="font-medium">{student.studentName}</div>
                       <div className="text-xs text-neutral-400">{student.studentEmail}</div>
                     </td>
-                    <td className="py-2 pr-3 text-neutral-500">
-                      {student.sessionStatus ?? "not started"}
+                    <td className="py-2 pr-3">
+                      {student.sessionStatus ? (
+                        <Badge
+                          tone={
+                            student.sessionStatus === "IN_PROGRESS"
+                              ? "info"
+                              : student.sessionStatus === "SUBMITTED"
+                                ? "success"
+                                : "neutral"
+                          }
+                        >
+                          {student.sessionStatus === "IN_PROGRESS"
+                            ? "in exam"
+                            : student.sessionStatus.toLowerCase()}
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-neutral-400">not started</span>
+                      )}
                     </td>
                     {student.questions.map((cell) => (
                       <td key={cell.questionId} className="py-2 pr-3">
@@ -223,7 +263,11 @@ function SessionDetail({
         </button>
       }
     >
-      {error ? <Alert kind="error">{error}</Alert> : null}
+      {error ? (
+        <Alert kind="error" onRetry={load}>
+          {error}
+        </Alert>
+      ) : null}
       {!result || !violations ? (
         <Spinner label="Loading breakdown…" />
       ) : (
