@@ -91,6 +91,14 @@ export async function evaluateSubmission(
         cpuTimeMs: bundle.question.timeLimitMs,
         memoryMb: bundle.question.memoryLimitMb,
       },
+      // Optional context; Judge0 ignores it, an analysis-based provider may use it.
+      problem: {
+        title: bundle.question.title,
+        statement: bundle.question.statement,
+        constraints: bundle.question.constraints,
+        inputFormat: bundle.question.inputFormat,
+        outputFormat: bundle.question.outputFormat,
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

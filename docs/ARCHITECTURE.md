@@ -308,6 +308,13 @@ call the same `evaluateSubmission(submissionId, deps)`:
    (visible + hidden) are loaded and sent to the Judge0 sandbox. Judge0 is
    abstracted behind `ExecutionProvider`; when `JUDGE0_URL` is unset the run is
    marked `FAILED` with `EXECUTION_UNAVAILABLE` - it never silently passes.
+   A **temporary, off-by-default** `GeminiExecutionProvider` can stand in for
+   Judge0 for a demo (`GEMINI_EXECUTION_FALLBACK_ENABLED=true` + a backend
+   `GEMINI_API_KEY`, only while `JUDGE0_URL` is unset). It is not a sandbox and
+   not a second grader: it returns the same internal `ExecutionResult` (a
+   per-case mechanical outcome only), and steps 3-4 are unchanged. Malformed
+   model output → one retry → normal `EVALUATOR_ERROR` failure. See
+   [DEVELOPMENT.md](DEVELOPMENT.md).
 3. **Grade** (see below).
 4. **Persist.** `TestCaseResult` per case (status, output/error truncated,
    time/memory), `CriterionScore` per rubric criterion, `EvaluationRun`

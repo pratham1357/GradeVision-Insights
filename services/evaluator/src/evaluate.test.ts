@@ -11,9 +11,10 @@ import type {
   SemanticAnalysis,
 } from "@gradevision/grading";
 import { unavailableAnalysis } from "@gradevision/grading";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { evaluateSubmission, type EvaluateDeps } from "./evaluate.js";
+import { GeminiExecutionProvider } from "./execution/gemini.js";
 import type { SemanticAnalysisService } from "./semantic/index.js";
 
 const ID = {
@@ -447,5 +448,90 @@ describe("evaluateSubmission", () => {
     const run = await prisma.evaluationRun.findFirstOrThrow({ where: { submissionId: id } });
     expect(run.status).toBe("FAILED");
     expect(run.errorMessage).toContain("judge0 unreachable");
+  });
+
+  describe("with the temporary Gemini execution fallback (fetch mocked)", () => {
+    const geminiConfig = {
+      apiKey: "test-key",
+      model: "gemini-2.0-flash",
+      baseUrl: "https://example.test/v1beta",
+      timeoutMs: 5_000,
+    };
+    const reply = (cases: Record<string, unknown>[]) =>
+      ({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            candidates: [{ content: { parts: [{ text: JSON.stringify({ cases }) }] } }],
+          }),
+        text: () => Promise.resolve(""),
+      }) as unknown as Response;
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("runs the full pipeline and lets the GRADING engine (not Gemini) set the score", async () => {
+      const id = await makeSubmission(ID.rubricQuestion);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          reply([
+            // Gemini only reports mechanical run info. Both cases "ran"; the hidden
+            // one prints the wrong answer -> the grader must dock weighted credit.
+            {
+              caseId: ID.tcVisible,
+              status: "ACCEPTED",
+              stdout: "5",
+              stderr: "",
+              time: 0.01,
+              memory: 2048,
+            },
+            {
+              caseId: ID.tcHidden,
+              status: "WRONG_ANSWER",
+              stdout: "WRONG",
+              stderr: "",
+              time: 0.01,
+              memory: 2048,
+            },
+          ]),
+        ),
+      );
+
+      const outcome = await evaluateSubmission(id, deps(new GeminiExecutionProvider(geminiConfig)));
+      expect(outcome.status).toBe("completed");
+
+      const run = await prisma.evaluationRun.findFirstOrThrow({ where: { submissionId: id } });
+      expect(run.status).toBe("COMPLETED");
+      // weighted ratio 1/4 -> same score the Judge0/mock path produces.
+      expect(Number(run.totalScore)).toBeCloseTo(25);
+      const results = await prisma.testCaseResult.findMany({
+        where: { evaluationRunId: run.id },
+        orderBy: { testCase: { position: "asc" } },
+      });
+      expect(results.map((r) => r.status)).toEqual(["PASSED", "FAILED"]);
+    });
+
+    it("marks the run FAILED (never stuck RUNNING) when Gemini stays malformed", async () => {
+      const id = await makeSubmission(ID.rubricQuestion);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({ candidates: [{ content: { parts: [{ text: "not json" }] } }] }),
+          text: () => Promise.resolve(""),
+        } as unknown as Response),
+      );
+
+      const outcome = await evaluateSubmission(id, deps(new GeminiExecutionProvider(geminiConfig)));
+      expect(outcome).toMatchObject({ status: "failed", errorType: "EVALUATOR_ERROR" });
+      const run = await prisma.evaluationRun.findFirstOrThrow({ where: { submissionId: id } });
+      expect(run.status).toBe("FAILED");
+      expect((await prisma.submission.findUniqueOrThrow({ where: { id } })).status).toBe("FAILED");
+    });
   });
 });

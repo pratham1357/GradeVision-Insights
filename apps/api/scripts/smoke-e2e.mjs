@@ -26,6 +26,8 @@ const { createApp } = await import("../dist/app.js");
 const { initRealtime, shutdownRealtime } = await import("../dist/realtime/index.js");
 const { prisma } = await import("../../../database/dist/index.js");
 const { evaluateSubmission } = await import("../../../services/evaluator/dist/evaluate.js");
+const { GeminiExecutionProvider } =
+  await import("../../../services/evaluator/dist/execution/gemini.js");
 const { io: ioClient } = await import("socket.io-client");
 
 let pass = 0;
@@ -184,6 +186,80 @@ try {
   const rowA = instrResults.body.students.find((s) => s.sessionId === sessionA);
   check("instructor results show A's score", Boolean(rowA) && rowA.totalScore === 100);
   check("instructor stats aggregate both students", instrResults.body.stats.totalStudents === 2);
+
+  // --- Temporary Gemini execution fallback: Student B, with `fetch` stubbed so
+  // no real model is called. Proves the pipeline still produces a normal result
+  // and that nothing about the provider leaks to the student.
+  const sessionB = startB.body.id;
+  const qB = startB.body.questions[0];
+  const submitB = await api(
+    "POST",
+    `/student/sessions/${sessionB}/questions/${qB.id}/submissions`,
+    studentB,
+    { language: "PYTHON", sourceCode: "a,b=map(int,input().split())\nprint(a+b)" },
+  );
+  const bundleB = await prisma.submission.findUnique({
+    where: { id: submitB.body.submission.id },
+    include: { question: { include: { testCases: true } } },
+  });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () =>
+    Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      cases: bundleB.question.testCases.map((tc) => ({
+                        caseId: tc.id,
+                        status: "ACCEPTED",
+                        stdout: tc.expectedOutput,
+                        stderr: "",
+                        time: 0.01,
+                        memory: 2048,
+                      })),
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      text: () => Promise.resolve(""),
+    });
+  let outcomeB;
+  try {
+    outcomeB = await evaluateSubmission(submitB.body.submission.id, {
+      executionProvider: new GeminiExecutionProvider({
+        apiKey: "smoke-key",
+        model: "gemini-2.0-flash",
+        baseUrl: "https://example.invalid/v1beta",
+        timeoutMs: 5000,
+      }),
+      analyzers: mockAnalyzers,
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  check(
+    "fallback path graded Student B's submission",
+    outcomeB.status === "completed" && outcomeB.scorePercent === 100,
+  );
+  const bResult = await api("GET", `/student/submissions/${submitB.body.submission.id}`, studentB);
+  check(
+    "Student B sees a normal COMPLETED result",
+    bResult.body.evaluation?.status === "COMPLETED",
+  );
+  const bPayload = JSON.stringify(bResult.body).toLowerCase();
+  check(
+    "student result never names the execution provider / AI / Judge0",
+    !/judge0|gemini|\bai\b|fallback|simulated|mock execution|fake execution/.test(bPayload),
+  );
 
   instr.seen.length = 0;
   const violation = await api("POST", `/student/sessions/${sessionA}/violations`, studentA, {

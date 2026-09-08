@@ -220,6 +220,26 @@ pnpm --filter @gradevision/hint-engine dev   # -> http://localhost:4200/health
   only, or run the full stack inside a Linux VM / WSL2 with cgroup v1, or point
   `JUDGE0_URL` at a separately hosted Judge0. See the header of
   `infrastructure/docker/docker-compose.yml`.
+- **Temporary Gemini execution fallback (demo/testing only).** When Judge0 is
+  genuinely unavailable, the evaluator can approximate execution results with a
+  Gemini model so the pipeline stays functional. It is a stopgap, not a Judge0
+  replacement, and is **off by default**. Enable it in `.env` with:
+
+  ```bash
+  # only takes effect while JUDGE0_URL is unset
+  GEMINI_EXECUTION_FALLBACK_ENABLED=true
+  GEMINI_API_KEY=<your backend Google AI Studio key>   # server-side only, never VITE_
+  # GEMINI_MODEL / GEMINI_BASE_URL / GEMINI_EXECUTION_TIMEOUT_MS have safe defaults
+  ```
+
+  Selection order is: Judge0 (`JUDGE0_URL` set) → Gemini fallback (flag on + key
+  present) → `EXECUTION_UNAVAILABLE`. The model only supplies a per-case
+  mechanical outcome (compiled? crashed? what did it print?); the existing
+  functional + rubric + semantic grading still computes every score. Malformed
+  model output is retried once and then surfaced as a normal `EVALUATOR_ERROR`
+  failure — it never hangs or crashes a worker, and hidden test data is never
+  logged. To return to the real sandbox, unset the flag and set `JUDGE0_URL`.
+
 - **The Python AST analyzer** shells out to `PYTHON_BIN` (`python3` by default).
   Set it to `python` on Windows if `python3` is not on PATH, or empty to disable.
 - **Realtime is optional too.** The API attaches Socket.IO at `/realtime` on the

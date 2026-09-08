@@ -20,6 +20,20 @@ export interface ExecutionLimits {
 }
 
 /**
+ * Optional problem context for a run. A real sandbox (Judge0) ignores this - it
+ * only compiles and runs. An analysis-based provider may use it to classify a
+ * run more faithfully. Never contains anything a student may not already see
+ * except when the provider runs entirely server-side.
+ */
+export interface ExecutionProblemContext {
+  title: string;
+  statement: string;
+  constraints?: string | null;
+  inputFormat?: string | null;
+  outputFormat?: string | null;
+}
+
+/**
  * How a single case's run terminated. The provider reports the *mechanical*
  * outcome only - whether the program's OUTPUT is correct is decided later by the
  * functional layer (so alternative implementations are graded on behaviour).
@@ -52,6 +66,8 @@ export interface ExecutionRequest {
   sourceCode: string;
   cases: ExecutionCase[];
   limits: ExecutionLimits;
+  /** Optional; only analysis-based providers consult it. Judge0 ignores it. */
+  problem?: ExecutionProblemContext;
 }
 
 /**
