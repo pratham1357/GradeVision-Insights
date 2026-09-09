@@ -6,7 +6,12 @@
  * data is never part of any student-facing type.
  */
 import type { SubmissionEvaluationSummary } from "./evaluation.js";
-import type { AssessmentStatus, ProgrammingLanguage, QuestionDifficulty } from "./instructor.js";
+import type {
+  AssessmentStatus,
+  ExternalProblemReference,
+  ProgrammingLanguage,
+  QuestionDifficulty,
+} from "./instructor.js";
 import type { SessionIntegritySummary } from "./integrity.js";
 
 export const EXAM_SESSION_STATUSES = [
@@ -84,6 +89,8 @@ export interface ExamQuestion {
   languages: { language: ProgrammingLanguage; starterCode: string | null }[];
   /** VISIBLE test cases only. HIDDEN cases are never included. */
   sampleTestCases: SampleTestCase[];
+  /** Informational-only pointer to a recognizable public problem, if any. */
+  externalReference: ExternalProblemReference | null;
   /** The student's last saved code for this question in this session. */
   draft: { language: ProgrammingLanguage; sourceCode: string; updatedAt: string } | null;
   /** Every submission the student has made for this question in this session (newest first). */

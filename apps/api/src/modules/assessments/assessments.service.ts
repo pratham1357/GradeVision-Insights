@@ -395,18 +395,20 @@ export async function getAssessmentSessionResult(
     throw ApiError.notFound("Exam session not found");
   }
 
-  const latestByQuestion = new Map<string, (typeof session.submissions)[number]>();
+  const submissionsByQuestion = new Map<string, typeof session.submissions>();
   for (const submission of session.submissions) {
-    if (!latestByQuestion.has(submission.questionId)) {
-      latestByQuestion.set(submission.questionId, submission);
-    }
+    const list = submissionsByQuestion.get(submission.questionId) ?? [];
+    list.push(submission);
+    submissionsByQuestion.set(submission.questionId, list);
   }
 
   let totalScore = 0;
   let maxScore = 0;
   const questions = session.assessment.questions.map((link) => {
     const points = Number(link.points);
-    const submission = latestByQuestion.get(link.questionId);
+    // Repository orders submissions `attemptNumber: "desc"` - index 0 is latest.
+    const versions = submissionsByQuestion.get(link.questionId) ?? [];
+    const submission = versions[0];
     const run = submission?.evaluationRuns[0] ?? null;
     const detail = toEvaluationDetail(run);
     const pct = detail?.scorePercent ?? null;
@@ -422,6 +424,16 @@ export async function getAssessmentSessionResult(
       submissionStatus: submission?.status ?? null,
       // `toEvaluationDetail` redacts hidden test-case input/expected/actual output.
       evaluation: detail,
+      // The student's own submitted code only - never a reference solution, never
+      // hidden test data. Read-only inspection in the instructor code viewer.
+      versions: versions.map((s) => ({
+        submissionId: s.id,
+        attemptNumber: s.attemptNumber,
+        language: s.language,
+        sourceCode: s.sourceCode,
+        status: s.status,
+        submittedAt: s.createdAt.toISOString(),
+      })),
     };
   });
 

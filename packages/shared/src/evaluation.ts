@@ -148,6 +148,20 @@ export interface InstructorAssessmentResults {
 }
 
 /**
+ * One immutable code snapshot for a question, as shown to an instructor in the
+ * read-only code viewer. Carries only what the student actually submitted -
+ * never a reference solution, never hidden test data.
+ */
+export interface InstructorSubmissionVersion {
+  submissionId: string;
+  attemptNumber: number;
+  language: ProgrammingLanguage;
+  sourceCode: string;
+  status: SubmissionStatus;
+  submittedAt: string;
+}
+
+/**
  * `GET /api/v1/assessments/:assessmentId/sessions/:sessionId/result` - one
  * student's full per-question breakdown. Hidden test-case input/expected/actual
  * output stay redacted even for the instructor.
@@ -174,5 +188,7 @@ export interface InstructorSessionResult {
     attemptNumber: number | null;
     submissionStatus: SubmissionStatus | null;
     evaluation: SubmissionEvaluationDetail | null;
+    /** Every submission this student made for this question in this session, newest first. */
+    versions: InstructorSubmissionVersion[];
   }[];
 }

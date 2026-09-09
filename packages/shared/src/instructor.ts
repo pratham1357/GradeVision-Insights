@@ -92,6 +92,19 @@ export interface AssessmentDetail extends AssessmentSummary {
 // Questions
 // ---------------------------------------------------------------------------
 
+/**
+ * Informational-only pointer to a recognizable public problem (e.g. LeetCode) a
+ * question is modelled after. Never fetched at runtime; never carries hidden
+ * tests or a solution - display metadata only.
+ */
+export interface ExternalProblemReference {
+  source: string;
+  number: number | null;
+  title: string | null;
+  difficulty: string | null;
+  url: string | null;
+}
+
 export interface QuestionSummary {
   id: string;
   title: string;
@@ -100,6 +113,7 @@ export interface QuestionSummary {
   testCaseCount: number;
   isArchived: boolean;
   updatedAt: string;
+  externalReference: ExternalProblemReference | null;
 }
 
 export interface QuestionLanguageDto {
@@ -153,4 +167,5 @@ export interface QuestionDetail {
   rubric: RubricDto;
   createdAt: string;
   updatedAt: string;
+  externalReference: ExternalProblemReference | null;
 }

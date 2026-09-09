@@ -2,6 +2,7 @@ import { Prisma, type ProgrammingLanguage } from "@gradevision/database";
 import type {
   ExamQuestion,
   ExamSessionView,
+  ExternalProblemReference,
   HintRequestResult,
   HintStageView,
   QuestionHintsView,
@@ -47,6 +48,23 @@ import type { RequestHintInput, SaveDraftInput, SubmitInput } from "./student.sc
 type SessionMeta = NonNullable<Awaited<ReturnType<typeof findSessionMeta>>>;
 type SessionViewRow = Awaited<ReturnType<typeof loadSessionView>>;
 type SessionRunRow = SessionViewRow["submissions"][number]["evaluationRuns"][number];
+
+/**
+ * Parses a question's informational `externalReference` JSON blob for the exam
+ * view. Tolerant of missing/malformed data - falls back to `null`.
+ */
+function toExternalReference(value: unknown): ExternalProblemReference | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.source !== "string" || v.source.length === 0) return null;
+  return {
+    source: v.source,
+    number: typeof v.number === "number" ? v.number : null,
+    title: typeof v.title === "string" ? v.title : null,
+    difficulty: typeof v.difficulty === "string" ? v.difficulty : null,
+    url: typeof v.url === "string" ? v.url : null,
+  };
+}
 
 /** Compact evaluation status for the exam view (lighter than the full result). */
 function summariseSessionRun(run: SessionRunRow | null) {
@@ -263,6 +281,7 @@ async function buildSessionView(sessionId: string, now: Date): Promise<ExamSessi
         input: tc.input,
         expectedOutput: tc.expectedOutput,
       })),
+      externalReference: toExternalReference(q.externalReference),
       draft: draft
         ? {
             language: draft.language,
@@ -439,10 +458,21 @@ export async function getQuestionHints(
     const delayOk = elapsed >= stage.unlockDelaySeconds;
 
     let lockedReason: string | null = null;
+    // Server-authoritative instant the time-gate clears, so the client can render
+    // a live "available in Ns" countdown without polling every second for it.
+    let unlockAt: string | null = null;
     if (!usage) {
-      if (!previousUsed) lockedReason = "Use the previous hint first";
-      else if (!delayOk) {
-        lockedReason = `Available ${stage.unlockDelaySeconds - elapsed}s from now`;
+      if (!previousUsed) {
+        lockedReason = "Use the previous hint first";
+      } else if (!delayOk) {
+        // A fixed instant derived straight from `startedAt` (not from "now minus
+        // elapsed", which re-floors every request and would drift by up to a
+        // second between calls) - the same request made a second apart returns
+        // the exact same `unlockAt`, so the client's local countdown never skews.
+        unlockAt = new Date(
+          meta.startedAt!.getTime() + stage.unlockDelaySeconds * 1000,
+        ).toISOString();
+        lockedReason = `Available in ${stage.unlockDelaySeconds - elapsed}s`;
       }
     }
 
@@ -455,6 +485,7 @@ export async function getQuestionHints(
       unlockDelaySeconds: stage.unlockDelaySeconds,
       available: !usage && previousUsed && delayOk && meta.status === "IN_PROGRESS",
       lockedReason,
+      unlockAt,
       status: usage?.status ?? null,
       content: consumed ? usageHintText(stage.content, usage?.detail ?? null) : null,
       requestedAt: usage?.requestedAt.toISOString() ?? null,

@@ -665,6 +665,7 @@ function QuestionNav({
 }
 
 function ProblemStatement({ question }: { question: ExamQuestion }) {
+  const ref = question.externalReference;
   return (
     <Card
       title={
@@ -672,6 +673,12 @@ function ProblemStatement({ question }: { question: ExamQuestion }) {
           {question.title}
           <Badge>{question.difficulty}</Badge>
           <span className="text-xs font-normal text-neutral-400">{question.points} pts</span>
+          {ref ? (
+            <Badge tone="info">
+              {ref.source}
+              {ref.number !== null ? ` #${ref.number}` : ""}
+            </Badge>
+          ) : null}
         </span>
       }
     >
@@ -897,6 +904,12 @@ function ResultDetail({
   );
 }
 
+/** Whole seconds until `iso`, clamped to >= 0. `null` when there is nothing to count down to. */
+function secondsUntil(iso: string | null, nowMs: number): number | null {
+  if (!iso) return null;
+  return Math.max(0, Math.ceil((Date.parse(iso) - nowMs) / 1000));
+}
+
 function HintsPanel({
   sessionId,
   questionId,
@@ -910,6 +923,7 @@ function HintsPanel({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     try {
@@ -923,6 +937,29 @@ function HintsPanel({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Live 1-second tick, but only while some stage is still time-gated - no
+  // interval (and no extra requests) once every stage is available or used.
+  const hasPendingUnlock = (stages ?? []).some((s) => s.unlockAt !== null);
+  useEffect(() => {
+    if (!hasPendingUnlock) return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [hasPendingUnlock]);
+
+  // The moment a stage's countdown reaches zero, re-fetch once (server-
+  // authoritative) so its button/state flips without the student navigating
+  // away and back. A ref guards against firing twice for the same reload.
+  const refreshingRef = useRef(false);
+  useEffect(() => {
+    if (!stages || refreshingRef.current) return;
+    const justUnlocked = stages.some((s) => s.unlockAt !== null && Date.parse(s.unlockAt) <= nowMs);
+    if (!justUnlocked) return;
+    refreshingRef.current = true;
+    void load().finally(() => {
+      refreshingRef.current = false;
+    });
+  }, [nowMs, stages, load]);
 
   async function requestStage(stageNumber: number) {
     setBusy(stageNumber);
@@ -974,7 +1011,16 @@ function HintsPanel({
                   {busy === stage.stageNumber ? "Getting…" : "Get hint"}
                 </Button>
               ) : (
-                <span className="text-xs text-neutral-400">{stage.lockedReason ?? "Locked"}</span>
+                <span className="text-xs tabular-nums text-neutral-400">
+                  {stage.unlockAt !== null
+                    ? (() => {
+                        const remaining = secondsUntil(stage.unlockAt, nowMs);
+                        return remaining !== null && remaining > 0
+                          ? `Available in ${remaining}s`
+                          : "Available in 0s";
+                      })()
+                    : (stage.lockedReason ?? "Locked")}
+                </span>
               )}
             </div>
             {stage.content ? (

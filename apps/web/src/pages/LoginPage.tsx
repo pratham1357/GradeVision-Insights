@@ -6,13 +6,6 @@ import { useAuth } from "../lib/auth-context";
 import { messageFromError } from "../lib/use-api";
 import { Alert, Button, Field, Input } from "../components/ui";
 
-/** Seeded local-dev accounts, shown only in the Vite dev build. */
-const DEV_ACCOUNTS = [
-  { label: "Instructor", email: "instructor@example.edu", password: "instructor-dev-password" },
-  { label: "Student 1", email: "student1@example.edu", password: "student-dev-password" },
-  { label: "Student 2", email: "student2@example.edu", password: "student-dev-password" },
-];
-
 export function LoginPage() {
   const { status, login } = useAuth();
   const navigate = useNavigate();
@@ -81,33 +74,6 @@ export function LoginPage() {
             {submitting ? "Signing in…" : "Sign in"}
           </Button>
         </form>
-
-        {import.meta.env.DEV ? (
-          <div className="rounded-lg border border-dashed border-neutral-300 bg-white p-3 text-xs text-neutral-500">
-            <p className="mb-1 font-medium text-neutral-600">Local dev accounts</p>
-            <ul className="space-y-1">
-              {DEV_ACCOUNTS.map((a) => (
-                <li key={a.email} className="flex items-center justify-between gap-2">
-                  <span>
-                    {a.label}: <code>{a.email}</code>
-                  </span>
-                  <button
-                    type="button"
-                    className="rounded border border-neutral-300 px-1.5 py-0.5 font-medium text-neutral-600 hover:bg-neutral-50"
-                    disabled={submitting}
-                    onClick={() => {
-                      setEmail(a.email);
-                      setPassword(a.password);
-                      void submit(a.email, a.password);
-                    }}
-                  >
-                    Use
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
       </div>
     </div>
   );

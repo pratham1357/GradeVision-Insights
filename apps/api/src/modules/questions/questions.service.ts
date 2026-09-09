@@ -1,4 +1,5 @@
 import type {
+  ExternalProblemReference,
   QuestionDetail,
   QuestionLanguageDto,
   QuestionSummary,
@@ -32,6 +33,24 @@ type SummaryRow = Awaited<ReturnType<typeof listInstructorQuestions>>[number];
 type DetailRow = NonNullable<Awaited<ReturnType<typeof findInstructorQuestion>>>;
 type TestCaseRow = DetailRow["testCases"][number];
 type RubricRow = Awaited<ReturnType<typeof findRubricWithCriteria>>;
+
+/**
+ * Parses the question's informational `externalReference` JSON blob into its
+ * typed shape. Tolerant of missing/malformed data (older rows, manual edits) -
+ * falls back to `null` rather than throwing.
+ */
+function toExternalReference(value: unknown): ExternalProblemReference | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.source !== "string" || v.source.length === 0) return null;
+  return {
+    source: v.source,
+    number: typeof v.number === "number" ? v.number : null,
+    title: typeof v.title === "string" ? v.title : null,
+    difficulty: typeof v.difficulty === "string" ? v.difficulty : null,
+    url: typeof v.url === "string" ? v.url : null,
+  };
+}
 
 function toTestCase(row: TestCaseRow): TestCaseDto {
   return {
@@ -87,6 +106,7 @@ function toDetail(row: DetailRow): QuestionDetail {
     rubric: toRubric(row.rubric),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    externalReference: toExternalReference(row.externalReference),
   };
 }
 
@@ -99,6 +119,7 @@ function toSummary(row: SummaryRow): QuestionSummary {
     testCaseCount: row._count.testCases,
     isArchived: row.isArchived,
     updatedAt: row.updatedAt.toISOString(),
+    externalReference: toExternalReference(row.externalReference),
   };
 }
 

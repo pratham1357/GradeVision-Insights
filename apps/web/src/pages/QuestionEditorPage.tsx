@@ -15,6 +15,7 @@ import { instructorApi } from "../lib/instructor-api";
 import { messageFromError, useApi } from "../lib/use-api";
 import {
   Alert,
+  Badge,
   Button,
   Card,
   EmptyState,
@@ -109,7 +110,16 @@ function EditQuestion({ id }: { id: string }) {
   return (
     <div className="max-w-3xl space-y-4">
       <BackLink />
-      <h1 className="text-xl font-semibold">{data.title}</h1>
+      <h1 className="flex items-center gap-2 text-xl font-semibold">
+        {data.title}
+        {data.externalReference ? (
+          <Badge tone="info">
+            {data.externalReference.source}
+            {data.externalReference.number !== null ? ` #${data.externalReference.number}` : ""}
+            {data.externalReference.difficulty ? ` · ${data.externalReference.difficulty}` : ""}
+          </Badge>
+        ) : null}
+      </h1>
       {banner ? <Alert kind={banner.kind}>{banner.text}</Alert> : null}
       <QuestionForm initial={initial} saving={saving} onSave={save} submitLabel="Save question" />
       <TestCaseEditor question={data} onChanged={reload} />

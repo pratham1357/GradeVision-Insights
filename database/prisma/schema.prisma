@@ -269,21 +269,25 @@ model AssessmentQuestion {
 // ---------------------------------------------------------------------------
 
 model Question {
-  id            String             @id @default(uuid(7)) @db.Uuid
-  title         String
-  statement     String
-  constraints   String?
-  inputFormat   String?
-  outputFormat  String?
-  difficulty    QuestionDifficulty @default(MEDIUM)
+  id                String             @id @default(uuid(7)) @db.Uuid
+  title             String
+  statement         String
+  constraints       String?
+  inputFormat       String?
+  outputFormat      String?
+  difficulty        QuestionDifficulty @default(MEDIUM)
   // Advisory problem limits; concrete execution/sandbox config lives in the evaluator.
-  timeLimitMs   Int?
-  memoryLimitMb Int?
-  isArchived    Boolean            @default(false)
-  createdById   String?            @db.Uuid
-  createdBy     User?              @relation("QuestionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  timeLimitMs       Int?
+  memoryLimitMb     Int?
+  isArchived        Boolean            @default(false)
+  // Informational-only pointer to a recognizable public problem (e.g. LeetCode) this
+  // question is modelled after. Shape: { source, number, title, difficulty, url }.
+  // Never used to fetch anything at runtime and never carries hidden tests/solutions.
+  externalReference Json?
+  createdById       String?            @db.Uuid
+  createdBy         User?              @relation("QuestionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   languages           QuestionLanguage[]
   testCases           TestCase[]

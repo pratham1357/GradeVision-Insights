@@ -21,6 +21,13 @@ export interface HintStageView {
   available: boolean;
   /** Why it is not yet available, for the UI. `null` when available or already used. */
   lockedReason: string | null;
+  /**
+   * Server-authoritative instant (ISO 8601) this stage's time-delay clears, so the
+   * client can render a live countdown without polling. `null` unless the stage is
+   * blocked purely on `unlockDelaySeconds` (i.e. the previous-stage gate is already
+   * satisfied) and not yet available.
+   */
+  unlockAt: string | null;
   /** Set once the stage has been requested/consumed by this session. */
   status: HintUsageStatus | null;
   /** Hint text, present only once the stage has been consumed. */

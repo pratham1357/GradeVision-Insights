@@ -3,15 +3,23 @@ import type {
   InstructorResultQuestionScore,
   InstructorResultRow,
   InstructorSessionResult,
+  InstructorSubmissionVersion,
   SessionViolationsView,
 } from "@gradevision/shared";
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 
+import { CodeEditor } from "../components/CodeEditor";
 import { Alert, Badge, Button, Card, PageHeader, Spinner } from "../components/ui";
 import { instructorApi } from "../lib/instructor-api";
+import { languageLabel } from "../lib/monaco";
 import { connectRealtime } from "../lib/realtime";
 import { messageFromError, useApi } from "../lib/use-api";
+
+/** No-op onChange - the instructor's viewer is read-only and never autosaves. */
+function noopChange(): void {
+  /* read-only */
+}
 
 export function AssessmentResultsPage() {
   const { assessmentId } = useParams();
@@ -317,6 +325,7 @@ function SessionDetail({
                   ) : null}
                 </>
               ) : null}
+              <CodeViewer versions={q.versions} />
             </div>
           ))}
 
@@ -340,5 +349,64 @@ function SessionDetail({
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * Read-only, Monaco-styled inspection of a student's submitted code for one
+ * question. Never editable, never runs code, never autosaves. If the student
+ * resubmitted, the instructor can switch between attempts.
+ */
+function CodeViewer({ versions }: { versions: InstructorSubmissionVersion[] }) {
+  const [open, setOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState(versions[0]?.submissionId ?? "");
+
+  if (versions.length === 0) {
+    return <p className="mt-2 text-xs text-neutral-400">No submission to inspect.</p>;
+  }
+
+  const selected = versions.find((v) => v.submissionId === selectedId) ?? versions[0]!;
+
+  return (
+    <div className="mt-2 border-t border-neutral-100 pt-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          className="text-xs font-medium text-blue-700 hover:underline"
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? "Hide code" : "View code"}
+        </button>
+        {open && versions.length > 1 ? (
+          <select
+            className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs"
+            value={selected.submissionId}
+            onChange={(e) => setSelectedId(e.target.value)}
+          >
+            {versions.map((v) => (
+              <option key={v.submissionId} value={v.submissionId}>
+                Attempt #{v.attemptNumber} · {v.status} · {new Date(v.submittedAt).toLocaleString()}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
+
+      {open ? (
+        <div className="mt-2 space-y-1.5">
+          <p className="text-xs text-neutral-400">
+            {languageLabel(selected.language)} · attempt #{selected.attemptNumber} ·{" "}
+            {selected.status.toLowerCase()} · submitted{" "}
+            {new Date(selected.submittedAt).toLocaleString()}
+          </p>
+          <CodeEditor
+            language={selected.language}
+            value={selected.sourceCode}
+            onChange={noopChange}
+            readOnly
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
