@@ -352,8 +352,11 @@ from the environment (nothing hard-coded) and calls the REST API with plain
 `PROVIDER_NOT_CONFIGURED` - never a fabricated hint.
 
 The API (`/api/v1/student/sessions/:id/questions/:qid/hints`) owns progression:
-stage 1 or "previous stage used", plus the stage's `unlockDelaySeconds` elapsed
-since session start. `STATIC` stages return `HintStage.content`; `INTERACTIVE`
+stage 1 or "previous stage used", plus evidence-based escalation (stage _N_
+needs N − 1 persisted unsuccessful evaluated attempts on the question; a passing
+latest attempt stops further escalation - see `hint-policy.ts` and
+`docs/AI_HINTS.md`; `unlockDelaySeconds` is legacy and no longer gates anything).
+`STATIC` stages return `HintStage.content`; `INTERACTIVE`
 stages forward the minimum context (title, statement, latest code, earlier
 hints) to the hint-engine. `HintUsage` (`@@unique([examSessionId, hintStageId])`)
 makes a repeat request idempotent.

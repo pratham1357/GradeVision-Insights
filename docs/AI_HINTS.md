@@ -5,7 +5,8 @@ Two moving parts:
 - **`services/hint-engine`** — a backend-only process that turns a hint request
   into guidance text via an LLM. Never reachable from the browser.
 - **The API** (`apps/api`, student module) — owns hint _policy_: progression,
-  unlock delays, persistence, and what context is allowed to leave the system.
+  evidence-based escalation, persistence, and what context is allowed to leave
+  the system.
 
 ## Stages (`HintStage` / `HintUsage`)
 
@@ -31,9 +32,27 @@ stages call the hint-engine.
 ### Progression rules (enforced in `student.service.ts`)
 
 1. **Order** — stage 1, or the previous stage already has a `HintUsage` for this
-   session. Otherwise `409 HINT_LOCKED`.
-2. **Delay** — `unlockDelaySeconds` must have elapsed since `session.startedAt`.
-   Otherwise `409 HINT_LOCKED`.
+   session. Otherwise `409 HINT_LOCKED` (`Use the previous hint first`).
+2. **Evidence** (`hint-policy.ts`) — escalation is gated on the student's own
+   persisted execution evidence for this session + question, never on elapsed
+   time:
+   - stage 1 is initial assistance and needs no evidence (asking early is fine);
+   - stage _N_ (N ≥ 2) needs at least **N − 1 unsuccessful evaluated attempts** —
+     submissions whose evaluation run `COMPLETED` with at least one test case
+     not `PASSED`. Queued/running submissions and evaluator failures
+     (`EXECUTION_UNAVAILABLE`, `EVALUATOR_ERROR`, …) are not evidence about the
+     student and never count;
+   - once the latest evaluated attempt passes every test, no further stage
+     unlocks (delivered hints stay readable); a later failing attempt re-opens
+     escalation on the evidence so far.
+     Otherwise `409 HINT_LOCKED` with a plain reason (`Submit an attempt first`,
+     `Available after 1 more unsuccessful attempt`, `Your latest attempt passed
+every test …`). The listing endpoint returns the same reason as
+     `lockedReason`.
+     `HintStage.unlockDelaySeconds` still exists in the schema and is echoed in
+     the API for compatibility, but it is **legacy** and no longer the source of
+     truth for anything; `HintStageView.unlockAt` is always `null`.
+     Assistance is observed, not penalised: using a hint never changes a score.
 3. **Idempotency** — `HintUsage` is unique on `(examSessionId, hintStageId)`; a
    repeat request for a consumed stage returns the same content.
 4. The session must be `IN_PROGRESS` and the question must be in its assessment.

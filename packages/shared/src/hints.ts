@@ -16,16 +16,23 @@ export interface HintStageView {
   title: string | null;
   description: string | null;
   deliveryType: HintDeliveryType;
+  /**
+   * Legacy stage configuration, echoed for compatibility only. Escalation is
+   * gated on the student's persisted execution evidence (unsuccessful evaluated
+   * attempts), not on elapsed time - this value no longer controls availability.
+   */
   unlockDelaySeconds: number;
-  /** The student may request this stage now (progression + unlock delay satisfied). */
+  /** The student may request this stage now (progression + evidence policy satisfied). */
   available: boolean;
-  /** Why it is not yet available, for the UI. `null` when available or already used. */
+  /**
+   * Why it is not yet available, for the UI - e.g. "Submit an attempt first".
+   * `null` when available or already used.
+   */
   lockedReason: string | null;
   /**
-   * Server-authoritative instant (ISO 8601) this stage's time-delay clears, so the
-   * client can render a live countdown without polling. `null` unless the stage is
-   * blocked purely on `unlockDelaySeconds` (i.e. the previous-stage gate is already
-   * satisfied) and not yet available.
+   * Kept for API compatibility; always `null` since escalation stopped being
+   * time-gated (there is no instant to count down to). Clients may still render
+   * a countdown if a non-null value ever appears.
    */
   unlockAt: string | null;
   /** Set once the stage has been requested/consumed by this session. */

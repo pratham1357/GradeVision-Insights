@@ -232,6 +232,26 @@ export function markHintUsageConsumed(id: string, detail?: Prisma.InputJsonValue
   });
 }
 
+/**
+ * Every attempt on a question in this session with its evaluation outcome -
+ * the persisted execution evidence the hint policy escalates on. Nothing about
+ * hidden test cases leaves the database here (statuses only).
+ */
+export function listHintEvidence(examSessionId: string, questionId: string) {
+  return prisma.submission.findMany({
+    where: { examSessionId, questionId },
+    orderBy: { attemptNumber: "asc" },
+    select: {
+      attemptNumber: true,
+      status: true,
+      evaluationRuns: {
+        where: { runNumber: 1 },
+        select: { status: true, testCaseResults: { select: { status: true } } },
+      },
+    },
+  });
+}
+
 export function latestSubmissionCode(examSessionId: string, questionId: string) {
   return prisma.submission.findFirst({
     where: { examSessionId, questionId },

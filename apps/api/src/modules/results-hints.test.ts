@@ -230,7 +230,7 @@ async function startSession(studentId: string): Promise<string> {
 /** Persists a completed EvaluationRun the way the evaluator would. */
 async function seedCompletedRun(
   sessionId: string,
-  opts: { visiblePassed: boolean; hiddenPassed: boolean; score: number },
+  opts: { visiblePassed: boolean; hiddenPassed: boolean; score: number; attemptNumber?: number },
 ): Promise<string> {
   const submission = await prisma.submission.create({
     data: {
@@ -238,7 +238,7 @@ async function seedCompletedRun(
       questionId: ID.question,
       language: "PYTHON",
       sourceCode: "a,b=map(int,input().split())\nprint(a+b)",
-      attemptNumber: 1,
+      attemptNumber: opts.attemptNumber ?? 1,
       status: "COMPLETED",
     },
   });
@@ -288,6 +288,16 @@ async function seedCompletedRun(
     },
   });
   return submission.id;
+}
+
+/** One persisted unsuccessful evaluation - the evidence a hint stage escalates on. */
+function seedFailedAttempt(sessionId: string, attemptNumber: number): Promise<string> {
+  return seedCompletedRun(sessionId, {
+    visiblePassed: false,
+    hiddenPassed: false,
+    score: 0,
+    attemptNumber,
+  });
 }
 
 describe("student submission results", () => {
@@ -433,6 +443,8 @@ describe("progressive hints", () => {
     expect(s1.body.data).toMatchObject({ status: "CONSUMED", source: "static" });
     expect(s1.body.data.content).toContain("operation");
 
+    // Stage 2 needs evidence of difficulty: one persisted unsuccessful evaluation.
+    await seedFailedAttempt(sessionId, 1);
     const s2 = await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 2 });
     expect(s2.status).toBe(201);
 
@@ -452,20 +464,136 @@ describe("progressive hints", () => {
     expect(await prisma.hintUsage.count({ where: { examSessionId: sessionId } })).toBe(2);
   });
 
-  it("respects the unlock delay", async () => {
+  it("elapsed time alone never unlocks a stronger hint", async () => {
+    // A session that started two hours ago - every legacy unlockDelaySeconds
+    // (0 / 0 / 0 / 3600) has elapsed - but with no execution evidence at all.
+    const session = await prisma.examSession.create({
+      data: {
+        assessmentId: ID.assessment,
+        studentId: ID.studentA,
+        status: "IN_PROGRESS",
+        startedAt: new Date(Date.now() - 7_200_000),
+        expiresAt: new Date(Date.now() + 3_600_000),
+      },
+    });
+    const url = `/api/v1/student/sessions/${session.id}/questions/${ID.question}/hints`;
+
+    // Initial assistance is always available - asking early is not punished.
+    const s1 = await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 1 });
+    expect(s1.status).toBe(201);
+
+    const s2 = await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 2 });
+    expect(s2.status).toBe(409);
+    expect(s2.body.error.code).toBe("HINT_LOCKED");
+    expect(s2.body.error.message).toBe("Submit an attempt first");
+
+    const list = await request(app).get(url).set("Authorization", studentA);
+    const [, st2, st3, st4] = list.body.data.stages;
+    for (const stage of [st2, st3, st4]) {
+      expect(stage).toMatchObject({ available: false, unlockAt: null, status: null });
+      expect(stage.lockedReason).toBeTruthy();
+    }
+  });
+
+  it("escalates one stage per persisted unsuccessful evaluation, regardless of the legacy delay", async () => {
     const sessionId = await startSession(ID.studentA);
     const url = `/api/v1/student/sessions/${sessionId}/questions/${ID.question}/hints`;
-    for (const stageNumber of [1, 2, 3]) {
-      if (stageNumber === 3)
-        mockHint.mockResolvedValueOnce("What does your parsing return for a blank line?");
-      await request(app).post(url).set("Authorization", studentA).send({ stageNumber });
-    }
+    const post = (stageNumber: number) =>
+      request(app).post(url).set("Authorization", studentA).send({ stageNumber });
+
+    expect((await post(1)).status).toBe(201);
+    expect((await post(2)).status).toBe(409);
+
+    await seedFailedAttempt(sessionId, 1);
+    expect((await post(2)).status).toBe(201);
+    const locked3 = await post(3);
+    expect(locked3.status).toBe(409);
+    expect(locked3.body.error.message).toBe("Available after 1 more unsuccessful attempt");
+
+    await seedFailedAttempt(sessionId, 2);
+    mockHint.mockResolvedValueOnce("What does your parsing return for a blank line?");
+    expect((await post(3)).status).toBe(201);
+    expect((await post(4)).status).toBe(409);
+
+    // Stage 4 carries unlockDelaySeconds: 3600 - irrelevant: evidence unlocks it now.
+    await seedFailedAttempt(sessionId, 3);
+    const s4 = await post(4);
+    expect(s4.status).toBe(201);
+    expect(s4.body.data.content).toContain("Double-check");
+  });
+
+  it("does not offer further hints once the latest attempt passes", async () => {
+    const sessionId = await startSession(ID.studentA);
+    const url = `/api/v1/student/sessions/${sessionId}/questions/${ID.question}/hints`;
+    await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 1 });
+    await seedFailedAttempt(sessionId, 1);
+    await seedCompletedRun(sessionId, {
+      visiblePassed: true,
+      hiddenPassed: true,
+      score: 100,
+      attemptNumber: 2,
+    });
+
+    const list = await request(app).get(url).set("Authorization", studentA);
+    const [st1, st2] = list.body.data.stages;
+    // Already-delivered guidance stays readable...
+    expect(st1).toMatchObject({ status: "CONSUMED" });
+    expect(st1.content).toContain("operation");
+    // ...but nothing stronger is offered.
+    expect(st2).toMatchObject({ available: false, status: null, content: null });
+    expect(st2.lockedReason).toContain("passed every test");
+
     const res = await request(app)
       .post(url)
       .set("Authorization", studentA)
-      .send({ stageNumber: 4 });
+      .send({ stageNumber: 2 });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe("HINT_LOCKED");
+  });
+
+  it("ignores queued and evaluator-failed runs as evidence", async () => {
+    const sessionId = await startSession(ID.studentA);
+    const url = `/api/v1/student/sessions/${sessionId}/questions/${ID.question}/hints`;
+    await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 1 });
+
+    await prisma.submission.create({
+      data: {
+        examSessionId: sessionId,
+        questionId: ID.question,
+        language: "PYTHON",
+        sourceCode: "print(1)",
+        attemptNumber: 1,
+        status: "QUEUED",
+      },
+    });
+    const failedSubmission = await prisma.submission.create({
+      data: {
+        examSessionId: sessionId,
+        questionId: ID.question,
+        language: "PYTHON",
+        sourceCode: "print(2)",
+        attemptNumber: 2,
+        status: "FAILED",
+      },
+    });
+    await prisma.evaluationRun.create({
+      data: {
+        submissionId: failedSubmission.id,
+        runNumber: 1,
+        status: "FAILED",
+        errorType: "EXECUTION_UNAVAILABLE",
+        errorMessage: "sandbox not configured",
+      },
+    });
+
+    const res = await request(app)
+      .post(url)
+      .set("Authorization", studentA)
+      .send({ stageNumber: 2 });
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toBe(
+      "Submit an attempt first (an attempt is still being graded)",
+    );
   });
 
   it("returns AI guidance for an interactive stage", async () => {
@@ -473,7 +601,9 @@ describe("progressive hints", () => {
     const sessionId = await startSession(ID.studentA);
     const url = `/api/v1/student/sessions/${sessionId}/questions/${ID.question}/hints`;
     await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 1 });
+    await seedFailedAttempt(sessionId, 1);
     await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 2 });
+    await seedFailedAttempt(sessionId, 2);
 
     const res = await request(app)
       .post(url)
@@ -496,7 +626,9 @@ describe("progressive hints", () => {
     const sessionId = await startSession(ID.studentA);
     const url = `/api/v1/student/sessions/${sessionId}/questions/${ID.question}/hints`;
     await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 1 });
+    await seedFailedAttempt(sessionId, 1);
     await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 2 });
+    await seedFailedAttempt(sessionId, 2);
 
     const res = await request(app)
       .post(url)
@@ -516,14 +648,16 @@ describe("progressive hints", () => {
     const sessionId = await startSession(ID.studentA);
     const url = `/api/v1/student/sessions/${sessionId}/questions/${ID.question}/hints`;
     await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 1 });
+    await seedFailedAttempt(sessionId, 1);
 
     const res = await request(app).get(url).set("Authorization", studentA);
     expect(res.status).toBe(200);
-    const [st1, st2, , st4] = res.body.data.stages;
+    const [st1, st2, st3, st4] = res.body.data.stages;
     expect(st1).toMatchObject({ status: "CONSUMED" });
     expect(st1.content).toContain("operation");
-    expect(st2).toMatchObject({ available: true, status: null, content: null });
-    expect(st4).toMatchObject({ available: false });
+    expect(st2).toMatchObject({ available: true, status: null, content: null, lockedReason: null });
+    expect(st3).toMatchObject({ available: false, lockedReason: "Use the previous hint first" });
+    expect(st4).toMatchObject({ available: false, unlockAt: null });
     expect(st4.lockedReason).toBeTruthy();
 
     const serialized = JSON.stringify(res.body);

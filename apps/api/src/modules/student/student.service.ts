@@ -22,6 +22,7 @@ import {
 import { emitAssessmentChanged, emitSessionChanged } from "../../realtime/index.js";
 import { getSessionIntegrity } from "../integrity/integrity.service.js";
 import { toEvaluationDetail } from "../results/mapper.js";
+import { decideHintStage, summariseHintEvidence } from "./hint-policy.js";
 import {
   createHintUsage,
   createSession,
@@ -36,6 +37,7 @@ import {
   findSubmissionResultForStudent,
   latestSubmissionCode,
   listEligibleAssessments,
+  listHintEvidence,
   loadQuestionHints,
   loadSessionView,
   markHintUsageConsumed,
@@ -433,9 +435,9 @@ function usageHintText(
   return stageContent;
 }
 
-function secondsSince(from: Date | null, now: Date): number {
-  if (!from) return Number.POSITIVE_INFINITY;
-  return Math.floor((now.getTime() - from.getTime()) / 1000);
+/** The persisted execution evidence for this session+question, folded for the policy. */
+async function loadHintEvidence(sessionId: string, questionId: string) {
+  return summariseHintEvidence(await listHintEvidence(sessionId, questionId));
 }
 
 export async function getQuestionHints(
@@ -448,33 +450,22 @@ export async function getQuestionHints(
     throw ApiError.notFound("Question is not part of this assessment");
   }
 
-  const now = new Date();
-  const stages = await loadQuestionHints(questionId, sessionId);
-  const elapsed = secondsSince(meta.startedAt, now);
+  const [stages, evidence] = await Promise.all([
+    loadQuestionHints(questionId, sessionId),
+    loadHintEvidence(sessionId, questionId),
+  ]);
 
   const views: HintStageView[] = stages.map((stage, index) => {
     const usage = (stage.usages[0] ?? null) as HintUsageRow | null;
     const previousUsed = index === 0 || stages[index - 1]!.usages.length > 0;
-    const delayOk = elapsed >= stage.unlockDelaySeconds;
-
-    let lockedReason: string | null = null;
-    // Server-authoritative instant the time-gate clears, so the client can render
-    // a live "available in Ns" countdown without polling every second for it.
-    let unlockAt: string | null = null;
-    if (!usage) {
-      if (!previousUsed) {
-        lockedReason = "Use the previous hint first";
-      } else if (!delayOk) {
-        // A fixed instant derived straight from `startedAt` (not from "now minus
-        // elapsed", which re-floors every request and would drift by up to a
-        // second between calls) - the same request made a second apart returns
-        // the exact same `unlockAt`, so the client's local countdown never skews.
-        unlockAt = new Date(
-          meta.startedAt!.getTime() + stage.unlockDelaySeconds * 1000,
-        ).toISOString();
-        lockedReason = `Available in ${stage.unlockDelaySeconds - elapsed}s`;
-      }
-    }
+    // Escalation is gated on the student's own execution evidence (see
+    // hint-policy.ts), never on elapsed time - `unlockDelaySeconds` is legacy
+    // configuration that no longer controls availability.
+    const decision = decideHintStage({
+      stageNumber: stage.stageNumber,
+      previousStageUsed: previousUsed,
+      evidence,
+    });
 
     const consumed = usage?.status === "CONSUMED";
     return {
@@ -483,9 +474,10 @@ export async function getQuestionHints(
       description: stage.description,
       deliveryType: stage.deliveryType,
       unlockDelaySeconds: stage.unlockDelaySeconds,
-      available: !usage && previousUsed && delayOk && meta.status === "IN_PROGRESS",
-      lockedReason,
-      unlockAt,
+      available: !usage && decision.eligible && meta.status === "IN_PROGRESS",
+      lockedReason: usage ? null : decision.lockedReason,
+      // No time gate means there is never an instant to count down to.
+      unlockAt: null,
       status: usage?.status ?? null,
       content: consumed ? usageHintText(stage.content, usage?.detail ?? null) : null,
       requestedAt: usage?.requestedAt.toISOString() ?? null,
@@ -529,21 +521,22 @@ export async function requestHint(
   }
 
   // Progression: stage 1, or the previous stage has been requested.
+  let previousStageUsed = true;
   if (stage.stageNumber > 1) {
     const prev = await findHintStage(questionId, stage.stageNumber - 1);
     const prevUsage = prev ? await findHintUsage(sessionId, prev.id) : null;
-    if (!prevUsage) {
-      throw new ApiError(409, "HINT_LOCKED", "Use the previous hint before this one");
-    }
+    previousStageUsed = prevUsage !== null;
   }
 
-  const elapsed = secondsSince(meta.startedAt, now);
-  if (elapsed < stage.unlockDelaySeconds) {
-    throw new ApiError(
-      409,
-      "HINT_LOCKED",
-      `This hint unlocks ${stage.unlockDelaySeconds - elapsed}s from now`,
-    );
+  // Escalation is decided from persisted execution evidence, never from elapsed
+  // time (see hint-policy.ts). Same decision the listing endpoint shows.
+  const decision = decideHintStage({
+    stageNumber: stage.stageNumber,
+    previousStageUsed,
+    evidence: await loadHintEvidence(sessionId, questionId),
+  });
+  if (!decision.eligible) {
+    throw new ApiError(409, "HINT_LOCKED", decision.lockedReason ?? "This hint is not available");
   }
 
   if (stage.deliveryType === "STATIC") {

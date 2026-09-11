@@ -513,6 +513,9 @@ function ExamRunner({
               sessionId={sessionId}
               questionId={currentId}
               locked={locked}
+              evidenceKey={current.submissions
+                .map((s) => `${s.id}:${s.status}:${s.evaluation?.status ?? "-"}`)
+                .join("|")}
             />
           </div>
         ) : (
@@ -914,10 +917,17 @@ function HintsPanel({
   sessionId,
   questionId,
   locked,
+  evidenceKey,
 }: {
   sessionId: string;
   questionId: string;
   locked: boolean;
+  /**
+   * Fingerprint of this question's submissions + evaluation states. Hint
+   * availability is gated on that evidence, so the list is re-fetched when it
+   * changes (e.g. a submission finishes grading) - not on a timer.
+   */
+  evidenceKey: string;
 }) {
   const [stages, setStages] = useState<HintStageView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -936,7 +946,7 @@ function HintsPanel({
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, evidenceKey]);
 
   // Live 1-second tick, but only while some stage is still time-gated - no
   // interval (and no extra requests) once every stage is available or used.
