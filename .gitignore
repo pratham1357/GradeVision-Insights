@@ -1,3 +1,7 @@
+# LLM Council generated reports
+council-report-*.html
+council-transcript-*.md
+
 # ---------- Dependencies ----------
 node_modules/
 .pnpm-store/
@@ -6,7 +10,6 @@ node_modules/
 .env
 .env.*
 !.env.example
-
 # ---------- Build / Distribution ----------
 dist/
 build/

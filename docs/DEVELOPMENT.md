@@ -220,6 +220,31 @@ pnpm --filter @gradevision/hint-engine dev   # -> http://localhost:4200/health
   only, or run the full stack inside a Linux VM / WSL2 with cgroup v1, or point
   `JUDGE0_URL` at a separately hosted Judge0. See the header of
   `infrastructure/docker/docker-compose.yml`.
+- **Local execution (real execution without Judge0; local dev / demo only).**
+  When Judge0 cannot run on this machine, the evaluator can compile and run
+  student programs itself with the toolchains on the host — `python3`, `node`,
+  `gcc`/`g++`, `javac`/`java` — via `node:child_process` (never a shell). This
+  is **real** execution: the program's actual stdout is what the grading engine
+  compares. It is **off by default**; enable it in `.env` with:
+
+  ```bash
+  # only takes effect while JUDGE0_URL is unset; wins over the Gemini fallback
+  LOCAL_EXECUTION_ENABLED=true
+  # PYTHON_BIN / LOCAL_NODE_BIN / LOCAL_GCC_BIN / LOCAL_GXX_BIN / LOCAL_JAVAC_BIN /
+  # LOCAL_JAVA_BIN default to the tool names on PATH; empty disables that language.
+  ```
+
+  What it enforces per test case: a hard wall-clock kill (the question's CPU
+  limit + 3 s, else `LOCAL_EXECUTION_DEFAULT_WALL_TIME_MS`), capped stdout/stderr,
+  a scrubbed child environment (no `DATABASE_URL` / API keys), a throwaway temp
+  directory removed afterwards, and stdin-only test input. What it does **not**
+  enforce: memory/CPU limits, network restriction, or a filesystem jail — the
+  program runs as the evaluator's own OS user. **Never enable it on a shared or
+  production host**; Judge0 (or a containerised successor) remains the sandbox
+  for that. Java submissions must declare `public class Main` (Judge0's
+  convention). A missing toolchain for a submitted language surfaces as a normal
+  `EVALUATOR_ERROR` failure for that run, never a crash.
+
 - **Temporary Gemini execution fallback (demo/testing only).** When Judge0 is
   genuinely unavailable, the evaluator can approximate execution results with a
   Gemini model so the pipeline stays functional. It is a stopgap, not a Judge0
@@ -232,8 +257,9 @@ pnpm --filter @gradevision/hint-engine dev   # -> http://localhost:4200/health
   # GEMINI_MODEL / GEMINI_BASE_URL / GEMINI_EXECUTION_TIMEOUT_MS have safe defaults
   ```
 
-  Selection order is: Judge0 (`JUDGE0_URL` set) → Gemini fallback (flag on + key
-  present) → `EXECUTION_UNAVAILABLE`. The model only supplies a per-case
+  Selection order is: Judge0 (`JUDGE0_URL` set) → local execution (flag on +
+  a toolchain present) → Gemini fallback (flag on + key present) →
+  `EXECUTION_UNAVAILABLE`. The model only supplies a per-case
   mechanical outcome (compiled? crashed? what did it print?); the existing
   functional + rubric + semantic grading still computes every score. Malformed
   model output is retried once and then surfaced as a normal `EVALUATOR_ERROR`
