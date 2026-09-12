@@ -229,6 +229,20 @@ export function loadAssessmentSessionResult(
         orderBy: { attemptNumber: "desc" },
         include: { evaluationRuns: { where: { runNumber: 1 }, ...runWithResultsArgs } },
       },
+      // Delivered hints, for the Evidence Replay timeline (placed by timestamp).
+      hintUsages: {
+        where: { status: "CONSUMED" },
+        orderBy: { requestedAt: "asc" },
+        select: {
+          questionId: true,
+          requestedAt: true,
+          consumedAt: true,
+          detail: true,
+          hintStage: {
+            select: { stageNumber: true, title: true, deliveryType: true, content: true },
+          },
+        },
+      },
       _count: { select: { violations: true } },
     },
   });

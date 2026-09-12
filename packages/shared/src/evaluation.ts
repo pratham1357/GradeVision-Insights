@@ -161,6 +161,57 @@ export interface InstructorSubmissionVersion {
   submittedAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// Evidence Replay (instructor) - reconstructed from persisted rows only
+// ---------------------------------------------------------------------------
+
+/**
+ * One persisted hint usage, placed in the attempt timeline by its timestamp.
+ * `grantedAfter` echoes the evidence the hint policy recorded when it granted
+ * the stage (counts only) - a fact about the record, not a causal claim.
+ */
+export interface ReplayHint {
+  stageNumber: number;
+  title: string | null;
+  source: "static" | "ai";
+  /** ISO instant the hint was delivered (consumedAt, else requestedAt). */
+  requestedAt: string;
+  /** The guidance text actually delivered, when persisted. */
+  content: string | null;
+  grantedAfter: {
+    unsuccessfulAttempts: number;
+    latestOutcome: "PASSED" | "FAILED" | null;
+  } | null;
+}
+
+/**
+ * One submission attempt with everything persisted about it: the code, the
+ * evaluation (hidden-case data redacted exactly as for students), and the
+ * hints delivered after the previous attempt and before this one.
+ */
+export interface ReplayAttempt {
+  attemptNumber: number;
+  submissionId: string;
+  submittedAt: string;
+  language: ProgrammingLanguage;
+  sourceCode: string;
+  submissionStatus: SubmissionStatus;
+  /** `null` while queued/running or when no run exists. */
+  evaluation: SubmissionEvaluationDetail | null;
+  hintsBefore: ReplayHint[];
+}
+
+/** The counted Transfer Check attempt, with the same evidence as a normal attempt. */
+export interface ReplayTransferAttempt {
+  submissionId: string;
+  attemptNumber: number;
+  submittedAt: string;
+  language: ProgrammingLanguage;
+  sourceCode: string;
+  submissionStatus: SubmissionStatus;
+  evaluation: SubmissionEvaluationDetail | null;
+}
+
 /**
  * `GET /api/v1/assessments/:assessmentId/sessions/:sessionId/result` - one
  * student's full per-question breakdown. Hidden test-case input/expected/actual
@@ -191,6 +242,13 @@ export interface InstructorSessionResult {
     /** Every submission this student made for this question in this session, newest first. */
     versions: InstructorSubmissionVersion[];
     /**
+     * Evidence Replay: every attempt oldest first, each with its own evaluation
+     * and the hints delivered before it. Reconstructed from persisted rows.
+     */
+    attempts: ReplayAttempt[];
+    /** Hints delivered after the final attempt (or with no attempt at all). */
+    hintsAfterFinalAttempt: ReplayHint[];
+    /**
      * The question's Transfer Check and this student's counted attempt at it, if
      * any. Reported beside - never inside - the question's marks.
      */
@@ -203,6 +261,7 @@ export interface InstructorSessionResult {
       testsPassed: number | null;
       testsTotal: number | null;
       submittedAt: string | null;
+      attempt: ReplayTransferAttempt | null;
     } | null;
   }[];
 }

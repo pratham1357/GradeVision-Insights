@@ -3,23 +3,16 @@ import type {
   InstructorResultQuestionScore,
   InstructorResultRow,
   InstructorSessionResult,
-  InstructorSubmissionVersion,
   SessionViolationsView,
 } from "@gradevision/shared";
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 
-import { CodeEditor } from "../components/CodeEditor";
+import { QuestionReplay } from "../components/EvidenceReplay";
 import { Alert, Badge, Button, Card, PageHeader, Spinner } from "../components/ui";
 import { instructorApi } from "../lib/instructor-api";
-import { languageLabel } from "../lib/monaco";
 import { connectRealtime } from "../lib/realtime";
 import { messageFromError, useApi } from "../lib/use-api";
-
-/** No-op onChange - the instructor's viewer is read-only and never autosaves. */
-function noopChange(): void {
-  /* read-only */
-}
 
 export function AssessmentResultsPage() {
   const { assessmentId } = useParams();
@@ -287,64 +280,7 @@ function SessionDetail({
           </p>
 
           {result.questions.map((q) => (
-            <div key={q.questionId} className="rounded-md border border-neutral-200 p-3">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="font-medium">
-                  Q{q.position + 1}. {q.title}
-                </span>
-                <span className="text-xs text-neutral-400">
-                  {q.evaluation
-                    ? `${q.evaluation.testsPassed}/${q.evaluation.testsTotal} tests · ${q.evaluation.score ?? 0}/${q.evaluation.maxScore ?? 0}`
-                    : q.submissionStatus
-                      ? q.submissionStatus
-                      : "no submission"}
-                </span>
-              </div>
-              {q.evaluation ? (
-                <>
-                  <ul className="space-y-0.5 text-xs text-neutral-600">
-                    {q.evaluation.testResults.map((t) => (
-                      <li key={t.index}>
-                        <span className={t.passed ? "text-green-600" : "text-red-600"}>
-                          {t.passed ? "✓" : "✗"}
-                        </span>{" "}
-                        {t.hidden ? `Hidden test ${t.index}` : (t.name ?? `Test ${t.index}`)} ·{" "}
-                        {t.status}
-                      </li>
-                    ))}
-                  </ul>
-                  {q.evaluation.rubric.length > 0 ? (
-                    <ul className="mt-1 space-y-0.5 text-xs text-neutral-600">
-                      {q.evaluation.rubric.map((r) => (
-                        <li key={r.name}>
-                          {r.name}: {r.pointsAwarded}/{r.maxPoints}
-                          {r.notes ? ` — ${r.notes}` : ""}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </>
-              ) : null}
-              <CodeViewer versions={q.versions} />
-              {q.transferCheck ? (
-                <p className="mt-2 border-t border-neutral-100 pt-2 text-xs text-neutral-600">
-                  <span className="font-medium">Transfer Check</span> ({q.transferCheck.title}):{" "}
-                  {q.transferCheck.result === "PASSED"
-                    ? "completed independently"
-                    : q.transferCheck.result === "FAILED"
-                      ? "not completed"
-                      : q.transferCheck.result === "PENDING"
-                        ? "being evaluated"
-                        : q.transferCheck.result === "NOT_EVALUATED"
-                          ? "could not be evaluated"
-                          : "not attempted"}
-                  {q.transferCheck.testsTotal !== null
-                    ? ` · ${q.transferCheck.testsPassed}/${q.transferCheck.testsTotal} tests`
-                    : ""}{" "}
-                  · not part of the score
-                </p>
-              ) : null}
-            </div>
+            <QuestionReplay key={q.questionId} question={q} />
           ))}
 
           <div>
@@ -367,64 +303,5 @@ function SessionDetail({
         </div>
       )}
     </Card>
-  );
-}
-
-/**
- * Read-only, Monaco-styled inspection of a student's submitted code for one
- * question. Never editable, never runs code, never autosaves. If the student
- * resubmitted, the instructor can switch between attempts.
- */
-function CodeViewer({ versions }: { versions: InstructorSubmissionVersion[] }) {
-  const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState(versions[0]?.submissionId ?? "");
-
-  if (versions.length === 0) {
-    return <p className="mt-2 text-xs text-neutral-400">No submission to inspect.</p>;
-  }
-
-  const selected = versions.find((v) => v.submissionId === selectedId) ?? versions[0]!;
-
-  return (
-    <div className="mt-2 border-t border-neutral-100 pt-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <button
-          type="button"
-          className="text-xs font-medium text-blue-700 hover:underline"
-          onClick={() => setOpen((o) => !o)}
-        >
-          {open ? "Hide code" : "View code"}
-        </button>
-        {open && versions.length > 1 ? (
-          <select
-            className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs"
-            value={selected.submissionId}
-            onChange={(e) => setSelectedId(e.target.value)}
-          >
-            {versions.map((v) => (
-              <option key={v.submissionId} value={v.submissionId}>
-                Attempt #{v.attemptNumber} · {v.status} · {new Date(v.submittedAt).toLocaleString()}
-              </option>
-            ))}
-          </select>
-        ) : null}
-      </div>
-
-      {open ? (
-        <div className="mt-2 space-y-1.5">
-          <p className="text-xs text-neutral-400">
-            {languageLabel(selected.language)} · attempt #{selected.attemptNumber} ·{" "}
-            {selected.status.toLowerCase()} · submitted{" "}
-            {new Date(selected.submittedAt).toLocaleString()}
-          </p>
-          <CodeEditor
-            language={selected.language}
-            value={selected.sourceCode}
-            onChange={noopChange}
-            readOnly
-          />
-        </div>
-      ) : null}
-    </div>
   );
 }

@@ -8,6 +8,8 @@ import type {
   InstructorResultQuestionScore,
   InstructorResultRow,
   InstructorSessionResult,
+  ReplayAttempt,
+  ReplayHint,
 } from "@gradevision/shared";
 
 import { ApiError } from "../../utils/api-error.js";
@@ -408,6 +410,80 @@ function computeStats(rows: InstructorResultRow[]): InstructorAssessmentStats {
 
 // --- Per-session breakdown (instructor) ----------------------------------
 
+type SessionResultRow = NonNullable<Awaited<ReturnType<typeof loadAssessmentSessionResult>>>;
+type SessionSubmissionRow = SessionResultRow["submissions"][number];
+type HintUsageRow = SessionResultRow["hintUsages"][number];
+
+/**
+ * A delivered hint as replay evidence. `content` is the text actually shown to
+ * the student (persisted AI text, else the authored static text); `grantedAfter`
+ * is what the hint policy recorded when it unlocked the stage - counts only.
+ */
+function toReplayHint(usage: HintUsageRow): ReplayHint {
+  const detail =
+    usage.detail && typeof usage.detail === "object" && !Array.isArray(usage.detail)
+      ? (usage.detail as Record<string, unknown>)
+      : null;
+  const aiText = typeof detail?.hint === "string" && detail.hint.length > 0 ? detail.hint : null;
+  const evidence =
+    detail?.evidence && typeof detail.evidence === "object" && !Array.isArray(detail.evidence)
+      ? (detail.evidence as Record<string, unknown>)
+      : null;
+  const unsuccessful = evidence?.unsuccessfulAttempts;
+  const latest = evidence?.latestOutcome;
+  return {
+    stageNumber: usage.hintStage.stageNumber,
+    title: usage.hintStage.title,
+    source: usage.hintStage.deliveryType === "INTERACTIVE" ? "ai" : "static",
+    requestedAt: (usage.consumedAt ?? usage.requestedAt).toISOString(),
+    content: aiText ?? usage.hintStage.content,
+    grantedAfter:
+      typeof unsuccessful === "number"
+        ? {
+            unsuccessfulAttempts: unsuccessful,
+            latestOutcome: latest === "PASSED" || latest === "FAILED" ? latest : null,
+          }
+        : null,
+  };
+}
+
+/**
+ * Places each delivered hint before the first attempt submitted at or after it
+ * ("Hint stage 2 was requested before Attempt 2"). Purely by timestamp - the
+ * replay states the order of the records, never why the student did anything.
+ */
+function buildReplayAttempts(
+  versionsNewestFirst: SessionSubmissionRow[],
+  usages: HintUsageRow[],
+): { attempts: ReplayAttempt[]; hintsAfterFinalAttempt: ReplayHint[] } {
+  const attempts = [...versionsNewestFirst].reverse();
+  const hints = [...usages]
+    .map((u) => ({ at: (u.consumedAt ?? u.requestedAt).getTime(), hint: toReplayHint(u) }))
+    .sort((a, b) => a.at - b.at);
+
+  let cursor = 0;
+  const replay: ReplayAttempt[] = attempts.map((s) => {
+    const submittedAt = s.createdAt.getTime();
+    const before: ReplayHint[] = [];
+    while (cursor < hints.length && hints[cursor]!.at <= submittedAt) {
+      before.push(hints[cursor]!.hint);
+      cursor += 1;
+    }
+    return {
+      attemptNumber: s.attemptNumber,
+      submissionId: s.id,
+      submittedAt: s.createdAt.toISOString(),
+      language: s.language,
+      sourceCode: s.sourceCode,
+      submissionStatus: s.status,
+      // `toEvaluationDetail` redacts hidden-case identity, input and outputs.
+      evaluation: toEvaluationDetail(s.evaluationRuns[0] ?? null),
+      hintsBefore: before,
+    };
+  });
+  return { attempts: replay, hintsAfterFinalAttempt: hints.slice(cursor).map((h) => h.hint) };
+}
+
 export async function getAssessmentSessionResult(
   assessmentId: string,
   sessionId: string,
@@ -418,11 +494,21 @@ export async function getAssessmentSessionResult(
     throw ApiError.notFound("Exam session not found");
   }
 
+  // Normal attempts by question. Transfer submissions are excluded here (they
+  // carry the transfer question's id and a transferSourceQuestionId) and are
+  // picked up separately below, so they never enter a question's history.
   const submissionsByQuestion = new Map<string, typeof session.submissions>();
   for (const submission of session.submissions) {
+    if (submission.transferSourceQuestionId) continue;
     const list = submissionsByQuestion.get(submission.questionId) ?? [];
     list.push(submission);
     submissionsByQuestion.set(submission.questionId, list);
+  }
+  const hintsByQuestion = new Map<string, HintUsageRow[]>();
+  for (const usage of session.hintUsages) {
+    const list = hintsByQuestion.get(usage.questionId) ?? [];
+    list.push(usage);
+    hintsByQuestion.set(usage.questionId, list);
   }
 
   let totalScore = 0;
@@ -459,9 +545,26 @@ export async function getAssessmentSessionResult(
             testsPassed: countedDetail?.testsPassed ?? null,
             testsTotal: countedDetail?.testsTotal ?? null,
             submittedAt: counted?.createdAt.toISOString() ?? null,
+            attempt: counted
+              ? {
+                  submissionId: counted.id,
+                  attemptNumber: counted.attemptNumber,
+                  submittedAt: counted.createdAt.toISOString(),
+                  language: counted.language,
+                  sourceCode: counted.sourceCode,
+                  submissionStatus: counted.status,
+                  evaluation: countedDetail,
+                }
+              : null,
           }
         : null;
+    const { attempts, hintsAfterFinalAttempt } = buildReplayAttempts(
+      versions,
+      hintsByQuestion.get(link.questionId) ?? [],
+    );
     return {
+      attempts,
+      hintsAfterFinalAttempt,
       transferCheck,
       questionId: link.questionId,
       title: link.question.title,
