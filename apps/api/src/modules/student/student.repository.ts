@@ -234,8 +234,10 @@ export function markHintUsageConsumed(id: string, detail?: Prisma.InputJsonValue
 
 /**
  * Every attempt on a question in this session with its evaluation outcome -
- * the persisted execution evidence the hint policy escalates on. Nothing about
- * hidden test cases leaves the database here (statuses only).
+ * the persisted execution evidence the hint policy escalates on and the hint
+ * context is built from. Test-case identity/visibility is loaded so the
+ * context builder can apply the same VISIBLE/HIDDEN redaction as the student
+ * result view (`results/mapper.ts`); nothing here leaves the API unredacted.
  */
 export function listHintEvidence(examSessionId: string, questionId: string) {
   return prisma.submission.findMany({
@@ -246,7 +248,25 @@ export function listHintEvidence(examSessionId: string, questionId: string) {
       status: true,
       evaluationRuns: {
         where: { runNumber: 1 },
-        select: { status: true, testCaseResults: { select: { status: true } } },
+        select: {
+          status: true,
+          testCaseResults: {
+            select: {
+              status: true,
+              stdout: true,
+              stderr: true,
+              testCase: {
+                select: {
+                  name: true,
+                  visibility: true,
+                  input: true,
+                  expectedOutput: true,
+                  position: true,
+                },
+              },
+            },
+          },
+        },
       },
     },
   });

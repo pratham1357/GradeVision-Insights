@@ -617,6 +617,101 @@ describe("progressive hints", () => {
     const [ctx] = mockHint.mock.calls[0]!;
     expect(ctx).toMatchObject({ stageNumber: 3, questionTitle: "Sum Two" });
     expect(ctx.previousHints.length).toBe(2);
+
+    // ...including the sanitized execution evidence the two failed attempts produced.
+    expect(ctx.evidence).toMatchObject({
+      evaluatedAttempts: 2,
+      unsuccessfulAttempts: 2,
+      pendingAttempts: 0,
+      notEvaluatedAttempts: 0,
+      latestOutcome: "FAILED",
+    });
+    expect(
+      ctx.evidence?.attempts.map((a) => [a.attemptNumber, a.testsPassed, a.testsTotal]),
+    ).toEqual([
+      [1, 0, 2],
+      [2, 0, 2],
+    ]);
+    expect(ctx.evidence?.attempts[1]?.hiddenTestsFailed).toBe(1);
+    // The visible failing case is described with what the student already sees...
+    expect(ctx.evidence?.latestVisibleFailures).toEqual([
+      {
+        name: "sample",
+        status: "FAILED",
+        input: "2 3",
+        expectedOutput: "5",
+        actualOutput: "4",
+        errorOutput: null,
+      },
+    ]);
+    // ...and nothing about the hidden case leaves the API.
+    const serialized = JSON.stringify(ctx);
+    expect(serialized).not.toContain(HIDDEN_INPUT);
+    expect(serialized).not.toContain(HIDDEN_EXPECTED);
+    expect(serialized).not.toContain(HIDDEN_STDOUT);
+    expect(serialized).not.toContain("hidden-edge");
+
+    // The usage row records what the guidance was grounded in (counts only).
+    const usage = await prisma.hintUsage.findFirst({ where: { hintStageId: ID.stage3 } });
+    expect(usage?.detail).toMatchObject({
+      hint: "Trace what happens when the two values are equal.",
+      evidence: { evaluatedAttempts: 2, unsuccessfulAttempts: 2, latestOutcome: "FAILED" },
+    });
+  });
+
+  it("tells the AI about progression, and about grader failures without blaming the student", async () => {
+    mockHint.mockResolvedValueOnce("Look at the second value.");
+    const sessionId = await startSession(ID.studentA);
+    const url = `/api/v1/student/sessions/${sessionId}/questions/${ID.question}/hints`;
+    await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 1 });
+    await seedFailedAttempt(sessionId, 1); // 0/2
+    await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 2 });
+    await seedCompletedRun(sessionId, {
+      visiblePassed: true,
+      hiddenPassed: false,
+      score: 50,
+      attemptNumber: 2,
+    }); // 1/2 - improved, still unsuccessful
+    const broken = await prisma.submission.create({
+      data: {
+        examSessionId: sessionId,
+        questionId: ID.question,
+        language: "PYTHON",
+        sourceCode: "print(3)",
+        attemptNumber: 3,
+        status: "FAILED",
+      },
+    });
+    await prisma.evaluationRun.create({
+      data: {
+        submissionId: broken.id,
+        runNumber: 1,
+        status: "FAILED",
+        errorType: "EVALUATOR_ERROR",
+        errorMessage: "sandbox exploded",
+      },
+    });
+
+    const res = await request(app)
+      .post(url)
+      .set("Authorization", studentA)
+      .send({ stageNumber: 3 });
+    expect(res.status).toBe(201);
+    const [ctx] = mockHint.mock.calls[0]!;
+    expect(
+      ctx.evidence?.attempts.map((a) => `${a.attemptNumber}:${a.outcome}:${a.testsPassed}`),
+    ).toEqual(["1:FAILED:0", "2:FAILED:1", "3:NOT_EVALUATED:null"]);
+    expect(ctx.evidence).toMatchObject({
+      evaluatedAttempts: 2,
+      unsuccessfulAttempts: 2,
+      notEvaluatedAttempts: 1,
+      latestOutcome: "FAILED",
+    });
+    // Attempt 2's only remaining failure is hidden -> counted, never described.
+    expect(ctx.evidence?.latestVisibleFailures).toEqual([]);
+    expect(ctx.evidence?.attempts[1]?.hiddenTestsFailed).toBe(1);
+    expect(JSON.stringify(ctx)).not.toContain("sandbox exploded");
+    expect(JSON.stringify(ctx)).not.toContain(HIDDEN_INPUT);
   });
 
   it("fails gracefully with 503 when the AI provider is not configured", async () => {

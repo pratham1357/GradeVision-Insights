@@ -41,6 +41,7 @@ const body: HintRequest = {
   questionStatement: "add up to target",
   studentCode: null,
   previousHints: [],
+  evidence: null,
 };
 
 describe("hint-engine HTTP", () => {

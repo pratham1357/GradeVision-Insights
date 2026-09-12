@@ -48,6 +48,66 @@ export interface QuestionHintsView {
   stages: HintStageView[];
 }
 
+// ---------------------------------------------------------------------------
+// Execution evidence handed to hint generation (API -> hint-engine)
+// ---------------------------------------------------------------------------
+
+/**
+ * One attempt as the hint generator may know it. Counts only - never test
+ * content. `PENDING` = still being graded; `NOT_EVALUATED` = the grader itself
+ * failed (sandbox unavailable, evaluator error), which says nothing about the
+ * student's code and must not be read as a failed attempt.
+ */
+export type HintAttemptOutcome = "PASSED" | "FAILED" | "PENDING" | "NOT_EVALUATED";
+
+export interface HintAttemptEvidence {
+  attemptNumber: number;
+  outcome: HintAttemptOutcome;
+  /** Graded (non-SKIPPED) cases passed / total; `null` unless evaluated. */
+  testsPassed: number | null;
+  testsTotal: number | null;
+  /** How many HIDDEN cases did not pass - a count only, never which or why. */
+  hiddenTestsFailed: number | null;
+}
+
+/**
+ * A failing VISIBLE test case from the latest evaluated attempt: exactly the
+ * data the student already sees in their own result view (`StudentTestResult`),
+ * plus a bounded excerpt of their program's own stderr for that input.
+ * Hidden cases are never represented here.
+ */
+export interface HintVisibleFailure {
+  name: string | null;
+  status: "FAILED" | "ERROR" | "TIMEOUT" | "SKIPPED";
+  input: string;
+  expectedOutput: string;
+  actualOutput: string;
+  errorOutput: string | null;
+}
+
+/**
+ * Sanitized, bounded execution evidence for one session + question. Built by
+ * the API from persisted `Submission` / `EvaluationRun` / `TestCaseResult`
+ * rows; the hint-engine only ever sees this shape. No identifiers, no hidden
+ * test data, no grader internals.
+ */
+export interface HintExecutionEvidence {
+  /** Attempts whose evaluation run COMPLETED. */
+  evaluatedAttempts: number;
+  /** Evaluated attempts with at least one case not PASSED. */
+  unsuccessfulAttempts: number;
+  /** Attempts still queued/running. */
+  pendingAttempts: number;
+  /** Attempts the grader could not evaluate (infrastructure, not the student). */
+  notEvaluatedAttempts: number;
+  /** Outcome of the most recent evaluated attempt; `null` when none completed. */
+  latestOutcome: "PASSED" | "FAILED" | null;
+  /** The most recent attempts, oldest first (bounded). */
+  attempts: HintAttemptEvidence[];
+  /** Visible failing cases of the latest evaluated attempt (bounded). */
+  latestVisibleFailures: HintVisibleFailure[];
+}
+
 /** `POST /api/v1/student/sessions/:sessionId/questions/:questionId/hints`. */
 export interface HintRequestResult {
   stageNumber: number;

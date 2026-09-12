@@ -6,6 +6,8 @@
  * API keys and model names are never surfaced to the caller: any failure becomes
  * a single `HintProviderUnavailableError`.
  */
+import type { HintExecutionEvidence } from "@gradevision/shared";
+
 import { env } from "../env.js";
 import { logger } from "../utils/logger.js";
 
@@ -18,6 +20,12 @@ export interface InteractiveHintContext {
   studentCode: string | null;
   /** Hint text already delivered for earlier stages (so the model escalates). */
   previousHints: string[];
+  /**
+   * Sanitized execution evidence (built by `hint-context.ts`): attempt counts,
+   * per-attempt pass/total, and the latest attempt's VISIBLE failing cases.
+   * Never hidden test data. `null` when the caller has none.
+   */
+  evidence: HintExecutionEvidence | null;
 }
 
 export class HintProviderUnavailableError extends Error {

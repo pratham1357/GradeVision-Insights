@@ -22,6 +22,7 @@ import {
 import { emitAssessmentChanged, emitSessionChanged } from "../../realtime/index.js";
 import { getSessionIntegrity } from "../integrity/integrity.service.js";
 import { toEvaluationDetail } from "../results/mapper.js";
+import { buildHintExecutionEvidence } from "./hint-context.js";
 import { decideHintStage, summariseHintEvidence } from "./hint-policy.js";
 import {
   createHintUsage,
@@ -529,11 +530,13 @@ export async function requestHint(
   }
 
   // Escalation is decided from persisted execution evidence, never from elapsed
-  // time (see hint-policy.ts). Same decision the listing endpoint shows.
+  // time (see hint-policy.ts). Same decision the listing endpoint shows. The
+  // same rows also feed the sanitized evidence an interactive hint is given.
+  const evidenceRows = await listHintEvidence(sessionId, questionId);
   const decision = decideHintStage({
     stageNumber: stage.stageNumber,
     previousStageUsed,
-    evidence: await loadHintEvidence(sessionId, questionId),
+    evidence: summariseHintEvidence(evidenceRows),
   });
   if (!decision.eligible) {
     throw new ApiError(409, "HINT_LOCKED", decision.lockedReason ?? "This hint is not available");
@@ -564,7 +567,9 @@ export async function requestHint(
     };
   }
 
-  // INTERACTIVE: call the backend hint-engine with the minimum context.
+  // INTERACTIVE: call the backend hint-engine with the minimum context - the
+  // student's latest code, earlier hint text, and the sanitized execution
+  // evidence (visible-case detail only; hidden cases as counts - hint-context.ts).
   const question = await findQuestionForHintContext(questionId);
   const latest = await latestSubmissionCode(sessionId, questionId);
   const priorStages = await loadQuestionHints(questionId, sessionId);
@@ -572,6 +577,7 @@ export async function requestHint(
     .filter((s) => s.stageNumber < stage.stageNumber && s.usages[0]?.status === "CONSUMED")
     .map((s) => usageHintText(s.content, s.usages[0]?.detail ?? null))
     .filter((t): t is string => Boolean(t));
+  const evidence = buildHintExecutionEvidence(evidenceRows);
 
   let hint: string;
   try {
@@ -582,6 +588,7 @@ export async function requestHint(
       questionStatement: question?.statement ?? "",
       studentCode: latest?.sourceCode ?? null,
       previousHints,
+      evidence,
     });
   } catch (error) {
     if (error instanceof HintProviderUnavailableError) {
@@ -590,7 +597,19 @@ export async function requestHint(
     throw error;
   }
 
-  const detail = { hint } satisfies Prisma.InputJsonObject;
+  // Record what the delivered guidance was grounded in (counts only) so the
+  // usage row can later be read as "given after N unsuccessful attempts".
+  const latestAttempt = evidence.attempts.at(-1) ?? null;
+  const detail = {
+    hint,
+    evidence: {
+      evaluatedAttempts: evidence.evaluatedAttempts,
+      unsuccessfulAttempts: evidence.unsuccessfulAttempts,
+      latestOutcome: evidence.latestOutcome,
+      latestTestsPassed: latestAttempt?.testsPassed ?? null,
+      latestTestsTotal: latestAttempt?.testsTotal ?? null,
+    },
+  } satisfies Prisma.InputJsonObject;
   if (existing) {
     await markHintUsageConsumed(existing.id, detail);
   } else {
