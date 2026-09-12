@@ -111,6 +111,9 @@ function toDetail(row: DetailRow): QuestionDetail {
     testCases: row.testCases.map(toTestCase),
     rubric: toRubric(row.rubric),
     concepts: row.concepts.map(toConcept),
+    transferQuestion: row.transferQuestion
+      ? { id: row.transferQuestion.id, title: row.transferQuestion.title }
+      : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     externalReference: toExternalReference(row.externalReference),
@@ -173,7 +176,27 @@ function splitQuestionInput(input: CreateQuestionInput) {
     })),
     // Deduplicated so a repeated id cannot trip the unique constraint.
     conceptIds: input.conceptIds === undefined ? undefined : [...new Set(input.conceptIds)],
+    transferQuestionId: input.transferQuestionId,
   };
+}
+
+/**
+ * A Transfer Check target must be a different question of the same instructor.
+ * (Whether it can share an assessment with its source is enforced when
+ * questions are attached / the assessment is activated.)
+ */
+async function assertTransferTarget(
+  transferQuestionId: string | null | undefined,
+  questionId: string | null,
+  instructorId: string,
+): Promise<void> {
+  if (!transferQuestionId) return;
+  if (questionId !== null && transferQuestionId === questionId) {
+    throw ApiError.badRequest("A question cannot be its own transfer check");
+  }
+  if (!(await findOwnedQuestionMeta(transferQuestionId, instructorId))) {
+    throw ApiError.badRequest("Unknown transfer question");
+  }
 }
 
 /** Client-supplied concept ids are never trusted: every one must exist. */
@@ -190,9 +213,18 @@ export async function createInstructorQuestion(
   input: CreateQuestionInput,
   instructorId: string,
 ): Promise<QuestionDetail> {
-  const { scalars, languages, conceptIds } = splitQuestionInput(input);
+  const { scalars, languages, conceptIds, transferQuestionId } = splitQuestionInput(input);
   await assertConceptsExist(conceptIds);
-  return toDetail(await createQuestion(scalars, instructorId, languages, conceptIds ?? []));
+  await assertTransferTarget(transferQuestionId, null, instructorId);
+  return toDetail(
+    await createQuestion(
+      scalars,
+      instructorId,
+      languages,
+      conceptIds ?? [],
+      transferQuestionId ?? null,
+    ),
+  );
 }
 
 export async function updateInstructorQuestion(
@@ -201,9 +233,12 @@ export async function updateInstructorQuestion(
   instructorId: string,
 ): Promise<QuestionDetail> {
   await assertQuestionOwner(questionId, instructorId);
-  const { scalars, languages, conceptIds } = splitQuestionInput(input);
+  const { scalars, languages, conceptIds, transferQuestionId } = splitQuestionInput(input);
   await assertConceptsExist(conceptIds);
-  return toDetail(await updateQuestion(questionId, scalars, languages, conceptIds));
+  await assertTransferTarget(transferQuestionId, questionId, instructorId);
+  return toDetail(
+    await updateQuestion(questionId, scalars, languages, conceptIds, transferQuestionId),
+  );
 }
 
 export async function addTestCase(

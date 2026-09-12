@@ -171,3 +171,29 @@ from `GET /api/v1/concepts`. Students never read or mutate them.
 The join exists so later layers can aggregate persisted evidence per concept -
 `Student -> Submission -> Question -> QuestionConcept -> Concept` - without a
 further schema change. That aggregation is deliberately not built yet.
+
+## 10. Transfer Check (`Question.transferQuestionId`, `Submission.transferSourceQuestionId`)
+
+GradeVision's rule is _assistance is observed, independence is measured_. A
+Transfer Check is a related question the student may attempt **without hints,
+once**, after an assessment question is solved, so the record can distinguish
+"solved with guidance available" from "then solved a related problem alone".
+
+Both are ordinary `Question` rows. `Question.transferQuestionId` (nullable
+self-relation, `SetNull`) is the instructor's choice of transfer question; a
+question cannot be its own target and a question and its target must never
+share an assessment (enforced when attaching questions and on activation).
+`Submission.transferSourceQuestionId` (nullable, `Restrict`) marks a transfer
+submission and names the source question it was offered for; its `questionId`
+is the transfer question, so it never appears in the source's attempt history,
+and because scoring only ever iterates `AssessmentQuestion`s it never touches a
+mark.
+
+Semantics live in `apps/api/src/modules/student/transfer-check.ts`: available
+once the source's latest evaluated attempt passed every test (the hint policy's
+own "solved" rule); one counted attempt (a run the grader could not complete
+does not consume it); result `PASSED` / `FAILED` / `PENDING` / `NOT_EVALUATED`
+read from the persisted evaluation - a factual observation, never a mastery
+score. The evaluator is unchanged: a transfer submission is graded by the exact
+same path as any other. Hints are refused server-side for a transfer question
+(`409 HINTS_UNAVAILABLE_FOR_TRANSFER`).

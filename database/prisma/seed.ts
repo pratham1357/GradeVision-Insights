@@ -61,6 +61,8 @@ const ids = {
   hintStage4: "00000000-0000-4000-8000-000000000074",
   q2HintStage1: "00000000-0000-4000-8000-000000000075",
   q2HintStage2: "00000000-0000-4000-8000-000000000076",
+  q3HintStage1: "00000000-0000-4000-8000-000000000077",
+  q3HintStage2: "00000000-0000-4000-8000-000000000078",
   // --- Additional CS101-level questions (question pool for random assignment) ---
   question3: "00000000-0000-4000-8000-000000000080",
   question4: "00000000-0000-4000-8000-000000000081",
@@ -89,6 +91,12 @@ const ids = {
   q5CriterionFunctional: "00000000-0000-4000-8000-000000000131",
   q5CriterionApproach: "00000000-0000-4000-8000-000000000132",
   q5CriterionQuality: "00000000-0000-4000-8000-000000000133",
+  // --- Transfer Check question (never in the pool: offered after Two Sum) ---
+  question6: "00000000-0000-4000-8000-000000000083",
+  q6TestSample: "00000000-0000-4000-8000-000000000102",
+  q6TestVisible: "00000000-0000-4000-8000-000000000103",
+  q6TestHidden1: "00000000-0000-4000-8000-000000000104",
+  q6TestHidden2: "00000000-0000-4000-8000-000000000105",
   // --- Concepts (instructor-authored labels attached to the questions above) ---
   conceptInputParsing: "00000000-0000-4000-8000-000000000200",
   conceptArithmetic: "00000000-0000-4000-8000-000000000201",
@@ -850,6 +858,98 @@ async function main(): Promise<void> {
     },
   ]);
 
+  // --- Transfer Check for Two Sum: a related hash-map problem, not a copy ---
+  // Kept OUT of the assessment pool: a question and its transfer check must
+  // never share an assessment (the transfer task is offered, hints off, after
+  // Two Sum is solved).
+  const question6 = await prisma.question.upsert({
+    where: { id: ids.question6 },
+    update: {},
+    create: {
+      id: ids.question6,
+      title: "Contains Duplicate",
+      statement:
+        "Given an array of integers `nums`, print `true` if any value appears at least twice " +
+        "in the array, and `false` if every element is distinct (lowercase, exactly as shown).",
+      constraints: "1 <= n <= 1000\n-10^6 <= nums[i] <= 10^6",
+      inputFormat: "Line 1: an integer n.\nLine 2: n space-separated integers - the array nums.",
+      outputFormat: "One line: `true` or `false` (lowercase).",
+      difficulty: QuestionDifficulty.EASY,
+      timeLimitMs: 2000,
+      memoryLimitMb: 256,
+      createdById: instructor.id,
+      externalReference: {
+        source: "LeetCode",
+        number: 217,
+        title: "Contains Duplicate",
+        difficulty: "Easy",
+        url: "https://leetcode.com/problems/contains-duplicate/",
+      } satisfies Prisma.InputJsonValue,
+      testCases: {
+        create: [
+          {
+            id: ids.q6TestSample,
+            name: "Sample",
+            input: "5\n1 2 3 1 5\n",
+            expectedOutput: "true\n",
+            visibility: TestCaseVisibility.VISIBLE,
+            category: TestCaseCategory.SAMPLE,
+            weight: 0,
+            position: 0,
+          },
+          {
+            id: ids.q6TestVisible,
+            name: "Visible - all distinct",
+            input: "4\n1 2 3 4\n",
+            expectedOutput: "false\n",
+            visibility: TestCaseVisibility.VISIBLE,
+            category: TestCaseCategory.STANDARD,
+            weight: 1,
+            position: 1,
+          },
+          {
+            id: ids.q6TestHidden1,
+            name: "Hidden - single element",
+            input: "1\n7\n",
+            expectedOutput: "false\n",
+            visibility: TestCaseVisibility.HIDDEN,
+            category: TestCaseCategory.EDGE,
+            weight: 1,
+            position: 2,
+          },
+          {
+            id: ids.q6TestHidden2,
+            name: "Hidden - negative duplicate",
+            input: "6\n-1 4 0 -1 2 3\n",
+            expectedOutput: "true\n",
+            visibility: TestCaseVisibility.HIDDEN,
+            category: TestCaseCategory.STANDARD,
+            weight: 1,
+            position: 3,
+          },
+        ],
+      },
+    },
+  });
+  await upsertLanguages(question6.id, [
+    {
+      language: ProgrammingLanguage.PYTHON,
+      starterCode: "n = int(input())\nnums = list(map(int, input().split()))\n# your code here\n",
+    },
+    {
+      language: ProgrammingLanguage.JAVASCRIPT,
+      starterCode:
+        "const lines = require('fs').readFileSync(0, 'utf8').trim().split('\\n');\n" +
+        "const n = Number(lines[0]);\n" +
+        "const nums = lines[1].split(' ').map(Number);\n// your code here\n",
+    },
+  ]);
+  // Two Sum -> Contains Duplicate (idempotent; converges on every run).
+  await prisma.question.update({
+    where: { id: question3.id },
+    data: { transferQuestionId: question6.id },
+  });
+
   // --- Assessments -------------------------------------------------------
   const assessment = await prisma.assessment.upsert({
     where: { id: ids.assessment },
@@ -974,6 +1074,30 @@ async function main(): Promise<void> {
       content:
         "Strip the trailing newline from the input, then interpolate it into `Hello, <name>!`.",
     },
+    // Two Sum: the source of the seeded Transfer Check, so the assisted -> transfer
+    // loop can be demonstrated end to end (assistance here, none on the transfer).
+    {
+      id: ids.q3HintStage1,
+      questionId: question3.id,
+      stageNumber: 1,
+      title: "Conceptual nudge",
+      description: "Points at the shape of the problem.",
+      deliveryType: HintDeliveryType.STATIC,
+      unlockDelaySeconds: 0,
+      content:
+        "For each number, the partner you need is fixed: target minus that number. Think about how to check quickly whether you have already seen it.",
+    },
+    {
+      id: ids.q3HintStage2,
+      questionId: question3.id,
+      stageNumber: 2,
+      title: "Specific direction",
+      description: "Names the technique.",
+      deliveryType: HintDeliveryType.STATIC,
+      unlockDelaySeconds: 0,
+      content:
+        "Keep a dictionary from value to index as you scan. Before storing a number, look up target minus it; if it is there, print that stored index and the current one.",
+    },
   ];
 
   for (const stage of hintStages) {
@@ -1048,6 +1172,7 @@ async function main(): Promise<void> {
     [question3.id, [ids.conceptArrays, ids.conceptLoops, ids.conceptHashMaps]], // Two Sum
     [question4.id, [ids.conceptStrings, ids.conceptLoops, ids.conceptStacks]], // Valid Parentheses
     [question5.id, [ids.conceptArithmetic, ids.conceptConditionals, ids.conceptStrings]], // Palindrome Number
+    [question6.id, [ids.conceptArrays, ids.conceptLoops, ids.conceptHashMaps]], // Contains Duplicate (transfer)
   ];
   for (const [questionId, conceptIds] of questionConcepts) {
     for (const conceptId of conceptIds) {

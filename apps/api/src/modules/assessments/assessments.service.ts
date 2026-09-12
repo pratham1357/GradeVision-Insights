@@ -16,8 +16,10 @@ import { violationCountsBySession } from "../integrity/integrity.repository.js";
 import { findOwnedQuestionMeta } from "../questions/questions.repository.js";
 import { emitAssessmentChanged, emitAssessmentSessionsChanged } from "../../realtime/index.js";
 import { toEvaluationDetail } from "../results/mapper.js";
+import { countedTransferAttempt, transferResultOf } from "../student/transfer-check.js";
 import {
   attachQuestion,
+  findTransferConflicts,
   createAssessment,
   detachQuestion,
   findAssessmentQuestion,
@@ -152,6 +154,11 @@ export async function updateInstructorAssessment(
         `Cannot change status from ${current.status} to ${input.status}`,
       );
     }
+    // A transfer target that was linked after the questions were attached must
+    // not go live as an ordinary question of the same assessment.
+    if (input.status === "ACTIVE" || input.status === "SCHEDULED") {
+      await assertNoTransferConflict(assessmentId);
+    }
   }
 
   const updated = await updateAssessment(assessmentId, {
@@ -174,6 +181,21 @@ export async function updateInstructorAssessment(
   }
 
   return toDetail(updated);
+}
+
+/** 409 when a question and its Transfer Check would both be in the assessment. */
+async function assertNoTransferConflict(
+  assessmentId: string,
+  candidateQuestionId?: string,
+): Promise<void> {
+  const conflicts = await findTransferConflicts(assessmentId, candidateQuestionId);
+  if (conflicts.length > 0) {
+    throw new ApiError(
+      409,
+      "TRANSFER_CONFLICT",
+      "A question and its transfer check cannot both be in the same assessment",
+    );
+  }
 }
 
 async function requireDraftAssessment(assessmentId: string, instructorId: string) {
@@ -206,6 +228,7 @@ export async function addAssessmentQuestion(
   if (await findAssessmentQuestion(assessmentId, input.questionId)) {
     throw new ApiError(409, "CONFLICT", "That question is already in this assessment");
   }
+  await assertNoTransferConflict(assessmentId, input.questionId);
 
   await attachQuestion({
     assessmentId,
@@ -414,7 +437,32 @@ export async function getAssessmentSessionResult(
     const pct = detail?.scorePercent ?? null;
     totalScore += pct === null ? 0 : Math.round((points * pct) / 100);
     maxScore += points;
+
+    // Transfer Check: reported beside the marks, never part of them. Transfer
+    // submissions carry a different questionId, so `versions` above never
+    // contains them and the score loop never sees them.
+    const transferTarget = link.question.transferQuestion;
+    const transferRows = session.submissions.filter(
+      (s) => s.transferSourceQuestionId === link.questionId,
+    );
+    const counted = countedTransferAttempt(transferRows);
+    const countedRun = counted?.evaluationRuns[0] ?? null;
+    const countedDetail = countedRun ? toEvaluationDetail(countedRun) : null;
+    const transferCheck =
+      transferTarget || counted
+        ? {
+            questionId: transferTarget?.id ?? counted!.questionId,
+            title: transferTarget?.title ?? "Transfer check",
+            attempted: counted !== null,
+            result: counted ? transferResultOf(counted) : null,
+            submissionId: counted?.id ?? null,
+            testsPassed: countedDetail?.testsPassed ?? null,
+            testsTotal: countedDetail?.testsTotal ?? null,
+            submittedAt: counted?.createdAt.toISOString() ?? null,
+          }
+        : null;
     return {
+      transferCheck,
       questionId: link.questionId,
       title: link.question.title,
       position: link.position,

@@ -6,13 +6,16 @@ import { recordViolationSchema } from "../integrity/integrity.schema.js";
 import {
   finishExamSession,
   getExamSession,
+  getQuestionTransferCheck,
   getSubmissionResultView,
   listAvailableAssessments,
   listQuestionHints,
   requestQuestionHint,
   saveQuestionDraft,
+  saveTransferQuestionDraft,
   startExamSession,
   submitQuestion,
+  submitTransferQuestion,
 } from "./student.controller.js";
 import {
   assessmentParamsSchema,
@@ -69,6 +72,27 @@ studentRouter.post(
   validateParams(sessionQuestionParamsSchema),
   validateBody(requestHintSchema),
   requestQuestionHint,
+);
+
+// Transfer Check: the related, hints-off task offered once :questionId is solved.
+// `:questionId` is always the SOURCE (assessment) question; the transfer
+// question is resolved server-side and is never taken from the client.
+studentRouter.get(
+  "/sessions/:sessionId/questions/:questionId/transfer",
+  validateParams(sessionQuestionParamsSchema),
+  getQuestionTransferCheck,
+);
+studentRouter.put(
+  "/sessions/:sessionId/questions/:questionId/transfer/draft",
+  validateParams(sessionQuestionParamsSchema),
+  validateBody(saveDraftSchema),
+  saveTransferQuestionDraft,
+);
+studentRouter.post(
+  "/sessions/:sessionId/questions/:questionId/transfer/submissions",
+  validateParams(sessionQuestionParamsSchema),
+  validateBody(submitSchema),
+  submitTransferQuestion,
 );
 
 studentRouter.get(

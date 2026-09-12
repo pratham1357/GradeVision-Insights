@@ -2,6 +2,8 @@ import { Prisma, type ProgrammingLanguage } from "@gradevision/database";
 import type {
   ExamQuestion,
   ExamSessionView,
+  ExamSubmissionSummary,
+  ExamTransferCheck,
   ExternalProblemReference,
   HintRequestResult,
   HintStageView,
@@ -11,6 +13,7 @@ import type {
   StudentAssessmentSummary,
   SubmissionResultView,
   SubmitResult,
+  TransferCheckView,
 } from "@gradevision/shared";
 
 import { ApiError } from "../../utils/api-error.js";
@@ -29,6 +32,7 @@ import {
   createSession,
   createSubmissionInSession,
   findAssessmentQuestionLink,
+  findDraft,
   findEligibleAssessment,
   findExistingSession,
   findHintStage,
@@ -36,21 +40,32 @@ import {
   findQuestionForHintContext,
   findSessionMeta,
   findSubmissionResultForStudent,
+  findTransferTarget,
+  isTransferQuestionForAssessment,
   latestSubmissionCode,
   listEligibleAssessments,
   listHintEvidence,
+  listTransferSubmissions,
   loadQuestionHints,
   loadSessionView,
   markHintUsageConsumed,
   questionSupportsLanguage,
   updateSessionStatus,
   upsertDraft,
+  type ExamQuestionRow,
+  type SessionSubmissionRow,
 } from "./student.repository.js";
+import {
+  countedTransferAttempt,
+  isSourceSolved,
+  transferGate,
+  transferResultOf,
+} from "./transfer-check.js";
 import type { RequestHintInput, SaveDraftInput, SubmitInput } from "./student.schema.js";
 
 type SessionMeta = NonNullable<Awaited<ReturnType<typeof findSessionMeta>>>;
-type SessionViewRow = Awaited<ReturnType<typeof loadSessionView>>;
-type SessionRunRow = SessionViewRow["submissions"][number]["evaluationRuns"][number];
+type SessionRunRow = SessionSubmissionRow["evaluationRuns"][number];
+type DraftRow = { language: ProgrammingLanguage; sourceCode: string; updatedAt: Date } | null;
 
 /**
  * Parses a question's informational `externalReference` JSON blob for the exam
@@ -108,6 +123,79 @@ function computeTiming(
       session.expiresAt === null
         ? null
         : Math.max(0, Math.floor((session.expiresAt.getTime() - now.getTime()) / 1000)),
+  };
+}
+
+function toSubmissionSummary(s: SessionSubmissionRow): ExamSubmissionSummary {
+  return {
+    id: s.id,
+    language: s.language,
+    status: s.status,
+    attemptNumber: s.attemptNumber,
+    createdAt: s.createdAt.toISOString(),
+    evaluation: summariseSessionRun(s.evaluationRuns[0] ?? null),
+  };
+}
+
+/** Shapes one question (assessment or transfer) for the exam client. */
+function toExamQuestion(
+  q: ExamQuestionRow,
+  link: { position: number; points: number },
+  draft: DraftRow,
+  submissions: SessionSubmissionRow[],
+  transferCheck: ExamTransferCheck | null,
+): ExamQuestion {
+  return {
+    id: q.id,
+    position: link.position,
+    points: link.points,
+    title: q.title,
+    statement: q.statement,
+    constraints: q.constraints,
+    inputFormat: q.inputFormat,
+    outputFormat: q.outputFormat,
+    difficulty: q.difficulty,
+    timeLimitMs: q.timeLimitMs,
+    memoryLimitMb: q.memoryLimitMb,
+    languages: q.languages.map((l) => ({ language: l.language, starterCode: l.starterCode })),
+    sampleTestCases: q.testCases.map((tc) => ({
+      name: tc.name,
+      input: tc.input,
+      expectedOutput: tc.expectedOutput,
+    })),
+    externalReference: toExternalReference(q.externalReference),
+    draft: draft
+      ? {
+          language: draft.language,
+          sourceCode: draft.sourceCode,
+          updatedAt: draft.updatedAt.toISOString(),
+        }
+      : null,
+    submissions: submissions.map(toSubmissionSummary),
+    transferCheck,
+  };
+}
+
+/**
+ * The Transfer Check as the student sees it on the source question: available
+ * once the source is solved, one counted attempt, a factual result.
+ */
+function toTransferCheck(
+  target: NonNullable<ExamQuestionRow["transferQuestion"]>,
+  sourceSubmissions: readonly SessionSubmissionRow[],
+  transferSubmissions: readonly SessionSubmissionRow[],
+): ExamTransferCheck {
+  const gate = transferGate(isSourceSolved(sourceSubmissions));
+  const counted = countedTransferAttempt(transferSubmissions);
+  return {
+    questionId: target.id,
+    title: target.title,
+    concepts: target.concepts.map((c) => c.concept.name),
+    available: gate.available,
+    lockedReason: gate.lockedReason,
+    attempted: counted !== null,
+    submission: counted ? toSubmissionSummary(counted) : null,
+    result: counted ? transferResultOf(counted) : null,
   };
 }
 
@@ -256,51 +344,31 @@ async function buildSessionView(sessionId: string, now: Date): Promise<ExamSessi
     getSessionIntegrity(sessionId),
   ]);
   const draftByQuestion = new Map(row.drafts.map((d) => [d.questionId, d]));
-  const submissionsByQuestion = new Map<string, SessionViewRow["submissions"]>();
+  // Normal submissions by their question; transfer submissions by the source
+  // question they were offered for (their own questionId is never an
+  // assessment question, so the two never mix).
+  const submissionsByQuestion = new Map<string, SessionSubmissionRow[]>();
+  const transferByQuestion = new Map<string, SessionSubmissionRow[]>();
   for (const submission of row.submissions) {
-    const list = submissionsByQuestion.get(submission.questionId) ?? [];
+    const target = submission.transferSourceQuestionId ? transferByQuestion : submissionsByQuestion;
+    const key = submission.transferSourceQuestionId ?? submission.questionId;
+    const list = target.get(key) ?? [];
     list.push(submission);
-    submissionsByQuestion.set(submission.questionId, list);
+    target.set(key, list);
   }
 
   const questions: ExamQuestion[] = row.assessment.questions.map((link) => {
     const q = link.question;
-    const draft = draftByQuestion.get(q.id);
-    return {
-      id: q.id,
-      position: link.position,
-      points: Number(link.points),
-      title: q.title,
-      statement: q.statement,
-      constraints: q.constraints,
-      inputFormat: q.inputFormat,
-      outputFormat: q.outputFormat,
-      difficulty: q.difficulty,
-      timeLimitMs: q.timeLimitMs,
-      memoryLimitMb: q.memoryLimitMb,
-      languages: q.languages.map((l) => ({ language: l.language, starterCode: l.starterCode })),
-      sampleTestCases: q.testCases.map((tc) => ({
-        name: tc.name,
-        input: tc.input,
-        expectedOutput: tc.expectedOutput,
-      })),
-      externalReference: toExternalReference(q.externalReference),
-      draft: draft
-        ? {
-            language: draft.language,
-            sourceCode: draft.sourceCode,
-            updatedAt: draft.updatedAt.toISOString(),
-          }
+    const submissions = submissionsByQuestion.get(q.id) ?? [];
+    return toExamQuestion(
+      q,
+      { position: link.position, points: Number(link.points) },
+      draftByQuestion.get(q.id) ?? null,
+      submissions,
+      q.transferQuestion
+        ? toTransferCheck(q.transferQuestion, submissions, transferByQuestion.get(q.id) ?? [])
         : null,
-      submissions: (submissionsByQuestion.get(q.id) ?? []).map((s) => ({
-        id: s.id,
-        language: s.language,
-        status: s.status,
-        attemptNumber: s.attemptNumber,
-        createdAt: s.createdAt.toISOString(),
-        evaluation: summariseSessionRun(s.evaluationRuns[0] ?? null),
-      })),
-    };
+    );
   });
 
   return {
@@ -392,6 +460,154 @@ export async function submitCode(
   };
 }
 
+// --- Transfer Check ---------------------------------------------------------
+
+/**
+ * Resolves the Transfer Check for a question in this session. The source must
+ * be in the assessment (so a transfer id from the browser can never reach an
+ * arbitrary question) and must have a target.
+ */
+async function loadTransferContext(meta: SessionMeta, sourceQuestionId: string) {
+  if (!(await findAssessmentQuestionLink(meta.assessmentId, sourceQuestionId))) {
+    throw ApiError.notFound("Question is not part of this assessment");
+  }
+  const source = await findTransferTarget(sourceQuestionId);
+  if (!source?.transferQuestion) {
+    throw ApiError.notFound("This question has no transfer check");
+  }
+  const [sourceRows, transferRows] = await Promise.all([
+    listHintEvidence(meta.id, sourceQuestionId),
+    listTransferSubmissions(meta.id, sourceQuestionId),
+  ]);
+  const solved = isSourceSolved(sourceRows);
+  if (!solved) {
+    throw new ApiError(409, "TRANSFER_LOCKED", "Solve the original question first");
+  }
+  return { source, target: source.transferQuestion, transferRows };
+}
+
+export async function getTransferCheck(
+  sessionId: string,
+  sourceQuestionId: string,
+  studentId: string,
+): Promise<TransferCheckView> {
+  const meta = await loadOwnedSessionMeta(sessionId, studentId);
+  const now = new Date();
+  const { source, target, transferRows } = await loadTransferContext(meta, sourceQuestionId);
+  const draft = await findDraft(sessionId, target.id);
+  // Source rows are not re-fetched here: the gate already passed, so `available`
+  // is true by construction for this view.
+  const transfer: ExamTransferCheck = {
+    questionId: target.id,
+    title: target.title,
+    concepts: target.concepts.map((c) => c.concept.name),
+    available: true,
+    lockedReason: null,
+    attempted: countedTransferAttempt(transferRows) !== null,
+    submission: (() => {
+      const counted = countedTransferAttempt(transferRows);
+      return counted ? toSubmissionSummary(counted) : null;
+    })(),
+    result: (() => {
+      const counted = countedTransferAttempt(transferRows);
+      return counted ? transferResultOf(counted) : null;
+    })(),
+  };
+  return {
+    sourceQuestionId,
+    sourceTitle: source.title,
+    question: toExamQuestion(target, { position: 0, points: 0 }, draft, transferRows, null),
+    transfer,
+    timing: computeTiming(meta, now),
+  };
+}
+
+export async function saveTransferDraft(
+  sessionId: string,
+  sourceQuestionId: string,
+  input: SaveDraftInput,
+  studentId: string,
+): Promise<SaveDraftResult> {
+  const now = new Date();
+  const meta = await loadOwnedSessionMeta(sessionId, studentId);
+  await ensureSessionIsActive(meta, now);
+  const { target } = await loadTransferContext(meta, sourceQuestionId);
+  if (!(await questionSupportsLanguage(target.id, input.language))) {
+    throw ApiError.badRequest("That language is not available for this question");
+  }
+  const draft = await upsertDraft({
+    examSessionId: sessionId,
+    questionId: target.id,
+    language: input.language,
+    sourceCode: input.sourceCode,
+  });
+  return {
+    questionId: target.id,
+    language: draft.language,
+    sourceCode: draft.sourceCode,
+    updatedAt: draft.updatedAt.toISOString(),
+    timing: computeTiming(meta, now),
+  };
+}
+
+/**
+ * The single independent attempt. Runs through the very same submission ->
+ * evaluator path as an assessment question; only `transferSourceQuestionId`
+ * marks it, which keeps it out of the source question's history and out of
+ * every score.
+ */
+export async function submitTransfer(
+  sessionId: string,
+  sourceQuestionId: string,
+  input: SubmitInput,
+  studentId: string,
+): Promise<SubmitResult> {
+  const now = new Date();
+  const meta = await loadOwnedSessionMeta(sessionId, studentId);
+  await ensureSessionIsActive(meta, now);
+  const { target, transferRows } = await loadTransferContext(meta, sourceQuestionId);
+  if (!(await questionSupportsLanguage(target.id, input.language))) {
+    throw ApiError.badRequest("That language is not available for this question");
+  }
+  if (countedTransferAttempt(transferRows)) {
+    throw new ApiError(
+      409,
+      "TRANSFER_ALREADY_ATTEMPTED",
+      "The transfer check allows a single attempt",
+    );
+  }
+
+  await upsertDraft({
+    examSessionId: sessionId,
+    questionId: target.id,
+    language: input.language,
+    sourceCode: input.sourceCode,
+  });
+  const submission = await createSubmissionInSession({
+    examSessionId: sessionId,
+    questionId: target.id,
+    language: input.language,
+    sourceCode: input.sourceCode,
+    transferSourceQuestionId: sourceQuestionId,
+  });
+  await enqueueEvaluation(submission.id);
+  emitSessionChanged(sessionId);
+  emitAssessmentChanged(meta.assessmentId);
+
+  return {
+    submission: {
+      id: submission.id,
+      questionId: submission.questionId,
+      language: submission.language,
+      status: submission.status,
+      attemptNumber: submission.attemptNumber,
+      createdAt: submission.createdAt.toISOString(),
+      evaluation: null,
+    },
+    timing: computeTiming(meta, now),
+  };
+}
+
 // --- Results ---------------------------------------------------------------
 
 export async function getSubmissionResult(
@@ -436,6 +652,22 @@ function usageHintText(
   return stageContent;
 }
 
+/**
+ * Hints are off, server-side, for a Transfer Check: the transfer question is
+ * attempted without assistance by definition. (It is also never an assessment
+ * question of this session, so the link check below would 404 anyway - this
+ * makes the refusal explicit.)
+ */
+async function assertHintsAllowed(meta: SessionMeta, questionId: string): Promise<void> {
+  if (await isTransferQuestionForAssessment(meta.assessmentId, questionId)) {
+    throw new ApiError(
+      409,
+      "HINTS_UNAVAILABLE_FOR_TRANSFER",
+      "Hints are unavailable during a Transfer Check",
+    );
+  }
+}
+
 /** The persisted execution evidence for this session+question, folded for the policy. */
 async function loadHintEvidence(sessionId: string, questionId: string) {
   return summariseHintEvidence(await listHintEvidence(sessionId, questionId));
@@ -447,6 +679,7 @@ export async function getQuestionHints(
   studentId: string,
 ): Promise<QuestionHintsView> {
   const meta = await loadOwnedSessionMeta(sessionId, studentId);
+  await assertHintsAllowed(meta, questionId);
   if (!(await findAssessmentQuestionLink(meta.assessmentId, questionId))) {
     throw ApiError.notFound("Question is not part of this assessment");
   }
@@ -497,6 +730,7 @@ export async function requestHint(
   const now = new Date();
   const meta = await loadOwnedSessionMeta(sessionId, studentId);
   await ensureSessionIsActive(meta, now);
+  await assertHintsAllowed(meta, questionId);
   if (!(await findAssessmentQuestionLink(meta.assessmentId, questionId))) {
     throw ApiError.notFound("Question is not part of this assessment");
   }

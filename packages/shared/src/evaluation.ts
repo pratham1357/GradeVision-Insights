@@ -6,7 +6,7 @@
  * (name, input, expected/actual output) is never part of a student-facing type.
  */
 import type { ProgrammingLanguage, RubricCriterionType, TestCaseVisibility } from "./instructor.js";
-import type { ExamSessionStatus, SubmissionStatus } from "./student.js";
+import type { ExamSessionStatus, SubmissionStatus, TransferCheckResult } from "./student.js";
 
 export const EVALUATION_RUN_STATUSES = [
   "PENDING",
@@ -190,5 +190,19 @@ export interface InstructorSessionResult {
     evaluation: SubmissionEvaluationDetail | null;
     /** Every submission this student made for this question in this session, newest first. */
     versions: InstructorSubmissionVersion[];
+    /**
+     * The question's Transfer Check and this student's counted attempt at it, if
+     * any. Reported beside - never inside - the question's marks.
+     */
+    transferCheck: {
+      questionId: string;
+      title: string;
+      attempted: boolean;
+      result: TransferCheckResult | null;
+      submissionId: string | null;
+      testsPassed: number | null;
+      testsTotal: number | null;
+      submittedAt: string | null;
+    } | null;
   }[];
 }

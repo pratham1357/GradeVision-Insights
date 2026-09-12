@@ -18,28 +18,69 @@ function eligibleWhere(studentId: string, now: Date): Prisma.AssessmentWhereInpu
   };
 }
 
-const sessionQuestionInclude = {
-  questions: {
+/** Everything the exam view shows for one question (assessment or transfer). */
+const examQuestionInclude = {
+  languages: {
+    where: { isEnabled: true },
+    orderBy: { language: "asc" },
+    select: { language: true, starterCode: true },
+  },
+  testCases: {
+    where: { visibility: "VISIBLE", isActive: true },
     orderBy: { position: "asc" },
-    include: {
-      question: {
-        include: {
-          languages: {
-            where: { isEnabled: true },
-            orderBy: { language: "asc" },
-            select: { language: true, starterCode: true },
-          },
-          testCases: {
-            where: { visibility: "VISIBLE", isActive: true },
-            orderBy: { position: "asc" },
-            // HIDDEN test cases never leave the database on a student query.
-            select: { name: true, input: true, expectedOutput: true },
-          },
-        },
+    // HIDDEN test cases never leave the database on a student query.
+    select: { name: true, input: true, expectedOutput: true },
+  },
+  // Concept labels (names only) - shown on a Transfer Check as "related concepts".
+  concepts: {
+    orderBy: { concept: { name: "asc" } },
+    select: { concept: { select: { name: true } } },
+  },
+  // The question's Transfer Check target, if the instructor attached one.
+  transferQuestion: {
+    select: {
+      id: true,
+      title: true,
+      concepts: {
+        orderBy: { concept: { name: "asc" } },
+        select: { concept: { select: { name: true } } },
       },
     },
   },
+} satisfies Prisma.QuestionInclude;
+
+export type ExamQuestionRow = Prisma.QuestionGetPayload<{ include: typeof examQuestionInclude }>;
+
+const sessionQuestionInclude = {
+  questions: {
+    orderBy: { position: "asc" },
+    include: { question: { include: examQuestionInclude } },
+  },
 } satisfies Prisma.AssessmentInclude;
+
+/** Compact submission + evaluation status, for the exam view and transfer checks. */
+const sessionSubmissionSelect = {
+  id: true,
+  questionId: true,
+  language: true,
+  status: true,
+  attemptNumber: true,
+  createdAt: true,
+  transferSourceQuestionId: true,
+  evaluationRuns: {
+    where: { runNumber: 1 },
+    select: {
+      status: true,
+      totalScore: true,
+      maxScore: true,
+      testCaseResults: { select: { status: true } },
+    },
+  },
+} satisfies Prisma.SubmissionSelect;
+
+export type SessionSubmissionRow = Prisma.SubmissionGetPayload<{
+  select: typeof sessionSubmissionSelect;
+}>;
 
 export function listEligibleAssessments(studentId: string, now: Date) {
   return prisma.assessment.findMany({
@@ -126,26 +167,56 @@ export function loadSessionView(sessionId: string) {
       },
       submissions: {
         orderBy: { attemptNumber: "desc" },
-        select: {
-          id: true,
-          questionId: true,
-          language: true,
-          status: true,
-          attemptNumber: true,
-          createdAt: true,
-          evaluationRuns: {
-            where: { runNumber: 1 },
-            select: {
-              status: true,
-              totalScore: true,
-              maxScore: true,
-              testCaseResults: { select: { status: true } },
-            },
-          },
-        },
+        select: sessionSubmissionSelect,
       },
     },
   });
+}
+
+// --- Transfer Check -------------------------------------------------------
+
+/** The source question's title and its Transfer Check question in exam shape. */
+export function findTransferTarget(sourceQuestionId: string) {
+  return prisma.question.findUnique({
+    where: { id: sourceQuestionId },
+    select: {
+      id: true,
+      title: true,
+      transferQuestion: { include: examQuestionInclude },
+    },
+  });
+}
+
+/** This session's Transfer Check submissions for a source question, newest first. */
+export function listTransferSubmissions(examSessionId: string, sourceQuestionId: string) {
+  return prisma.submission.findMany({
+    where: { examSessionId, transferSourceQuestionId: sourceQuestionId },
+    orderBy: { attemptNumber: "desc" },
+    select: sessionSubmissionSelect,
+  });
+}
+
+export function findDraft(examSessionId: string, questionId: string) {
+  return prisma.submissionDraft.findUnique({
+    where: { examSessionId_questionId: { examSessionId, questionId } },
+    select: { questionId: true, language: true, sourceCode: true, updatedAt: true },
+  });
+}
+
+/**
+ * True when `questionId` is the Transfer Check target of a question in this
+ * assessment - i.e. it is being attempted as a transfer task, where hints are
+ * off by definition.
+ */
+export async function isTransferQuestionForAssessment(
+  assessmentId: string,
+  questionId: string,
+): Promise<boolean> {
+  const link = await prisma.assessmentQuestion.findFirst({
+    where: { assessmentId, question: { transferQuestionId: questionId } },
+    select: { id: true },
+  });
+  return link !== null;
 }
 
 /** Full evaluation detail for one submission, scoped to its owning student (else null). */
@@ -317,6 +388,8 @@ export function createSubmissionInSession(data: {
   questionId: string;
   language: ProgrammingLanguage;
   sourceCode: string;
+  /** Set for a Transfer Check submission: the assisted question it was offered for. */
+  transferSourceQuestionId?: string | null;
 }) {
   return prisma.$transaction(async (tx) => {
     const last = await tx.submission.aggregate({
@@ -331,6 +404,7 @@ export function createSubmissionInSession(data: {
         sourceCode: data.sourceCode,
         attemptNumber: (last._max.attemptNumber ?? 0) + 1,
         status: "QUEUED",
+        transferSourceQuestionId: data.transferSourceQuestionId ?? null,
       },
       select: {
         id: true,

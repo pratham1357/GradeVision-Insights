@@ -39,6 +39,7 @@ const detailInclude = {
     orderBy: { concept: { name: "asc" } },
     select: { concept: { select: { id: true, name: true, description: true } } },
   },
+  transferQuestion: { select: { id: true, title: true } },
 } satisfies Prisma.QuestionInclude;
 
 export function listInstructorQuestions(instructorId: string) {
@@ -69,11 +70,13 @@ export function createQuestion(
   createdById: string,
   languages: QuestionLanguageInput[],
   conceptIds: string[] = [],
+  transferQuestionId: string | null = null,
 ) {
   return prisma.question.create({
     data: {
       ...scalars,
       createdById,
+      transferQuestionId,
       languages: { create: languages.map((l) => ({ ...l })) },
       concepts: { create: conceptIds.map((conceptId) => ({ conceptId })) },
     },
@@ -90,9 +93,13 @@ export function updateQuestion(
   scalars: QuestionScalarInput,
   languages: QuestionLanguageInput[],
   conceptIds?: string[],
+  transferQuestionId?: string | null,
 ) {
   return prisma.$transaction(async (tx) => {
-    await tx.question.update({ where: { id: questionId }, data: scalars });
+    await tx.question.update({
+      where: { id: questionId },
+      data: { ...scalars, ...(transferQuestionId !== undefined ? { transferQuestionId } : {}) },
+    });
     await tx.questionLanguage.deleteMany({ where: { questionId } });
     if (languages.length > 0) {
       await tx.questionLanguage.createMany({

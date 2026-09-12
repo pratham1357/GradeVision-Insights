@@ -177,6 +177,8 @@ export interface QuestionDetail {
   rubric: RubricDto;
   /** Concepts this question involves, alphabetical. Empty when none are assigned. */
   concepts: ConceptDto[];
+  /** Instructor-chosen Transfer Check question offered after this one is solved. */
+  transferQuestion: { id: string; title: string } | null;
   createdAt: string;
   updatedAt: string;
   externalReference: ExternalProblemReference | null;

@@ -1,6 +1,7 @@
 import type {
   ExamQuestion,
   ExamSessionView,
+  ExamTransferCheck,
   HintStageView,
   ProgrammingLanguage,
   SessionTiming,
@@ -508,6 +509,15 @@ function ExamRunner({
 
             <ResultPanel key={`result-${currentId}`} question={current} />
 
+            {current.transferCheck ? (
+              <TransferCheckCard
+                sessionId={sessionId}
+                question={current}
+                transfer={current.transferCheck}
+                locked={locked}
+              />
+            ) : null}
+
             <HintsPanel
               key={`hints-${currentId}`}
               sessionId={sessionId}
@@ -667,7 +677,13 @@ function QuestionNav({
   );
 }
 
-function ProblemStatement({ question }: { question: ExamQuestion }) {
+export function ProblemStatement({
+  question,
+  showPoints = true,
+}: {
+  question: ExamQuestion;
+  showPoints?: boolean;
+}) {
   const ref = question.externalReference;
   return (
     <Card
@@ -675,7 +691,9 @@ function ProblemStatement({ question }: { question: ExamQuestion }) {
         <span className="flex items-center gap-2">
           {question.title}
           <Badge>{question.difficulty}</Badge>
-          <span className="text-xs font-normal text-neutral-400">{question.points} pts</span>
+          {showPoints ? (
+            <span className="text-xs font-normal text-neutral-400">{question.points} pts</span>
+          ) : null}
           {ref ? (
             <Badge tone="info">
               {ref.source}
@@ -764,7 +782,7 @@ function EvaluationBadge({
   );
 }
 
-function ResultPanel({ question }: { question: ExamQuestion }) {
+export function ResultPanel({ question }: { question: ExamQuestion }) {
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<SubmissionResultView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1041,6 +1059,101 @@ function HintsPanel({
           </li>
         ))}
       </ol>
+    </Card>
+  );
+}
+
+/** Plain, factual wording for a transfer result - never "mastery". */
+export function transferResultLabel(result: ExamTransferCheck["result"]): string {
+  switch (result) {
+    case "PASSED":
+      return "✓ Completed independently";
+    case "FAILED":
+      return "✗ Not completed";
+    case "PENDING":
+      return "Being evaluated…";
+    case "NOT_EVALUATED":
+      return "Could not be evaluated";
+    default:
+      return "Not attempted";
+  }
+}
+
+/**
+ * Shown under a question that has a Transfer Check. Locked until the question
+ * is solved; then offers the related, hints-off task; then shows its result -
+ * separately from the question's own score.
+ */
+function TransferCheckCard({
+  sessionId,
+  question,
+  transfer,
+  locked,
+}: {
+  sessionId: string;
+  question: ExamQuestion;
+  transfer: ExamTransferCheck;
+  locked: boolean;
+}) {
+  const href = `/student/exam/${sessionId}/transfer/${question.id}`;
+  return (
+    <Card
+      title={
+        <span className="flex items-center gap-2">
+          Transfer Check
+          <Badge tone="neutral">Hints off</Badge>
+        </span>
+      }
+      actions={
+        transfer.attempted ? (
+          <span className="text-xs font-medium text-neutral-700">
+            {transferResultLabel(transfer.result)}
+          </span>
+        ) : null
+      }
+    >
+      <div className="space-y-2 text-sm">
+        {transfer.concepts.length > 0 ? (
+          <p className="text-xs text-neutral-500">
+            Related concept{transfer.concepts.length === 1 ? "" : "s"}:{" "}
+            {transfer.concepts.join(", ")}
+          </p>
+        ) : null}
+        {transfer.attempted ? (
+          <>
+            <p className="text-neutral-700">
+              <span className="font-medium">{transfer.title}</span> —{" "}
+              {transferResultLabel(transfer.result)}. Recorded separately from this question's
+              score.
+            </p>
+            <Link to={href} className="text-xs text-blue-700 hover:underline">
+              View your transfer attempt →
+            </Link>
+          </>
+        ) : transfer.available ? (
+          <>
+            <p className="text-green-700">✓ Problem solved.</p>
+            <p className="text-neutral-700">
+              You've completed this problem with guidance available. Try a related problem —{" "}
+              <span className="font-medium">{transfer.title}</span> — without hints, in one attempt.
+              The result is recorded separately from your assessment score.
+            </p>
+            {!locked ? (
+              <Link
+                to={href}
+                className="inline-block rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Start Transfer Check
+              </Link>
+            ) : null}
+          </>
+        ) : (
+          <p className="text-neutral-500">
+            {transfer.lockedReason ?? "Unavailable"} — a related problem without hints unlocks once
+            your latest submission passes every test.
+          </p>
+        )}
+      </div>
     </Card>
   );
 }

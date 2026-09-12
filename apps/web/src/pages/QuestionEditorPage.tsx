@@ -38,6 +38,7 @@ const EMPTY: QuestionInput = {
   memoryLimitMb: null,
   languages: [],
   conceptIds: [],
+  transferQuestionId: null,
 };
 
 export function QuestionEditorPage() {
@@ -108,6 +109,7 @@ function EditQuestion({ id }: { id: string }) {
     memoryLimitMb: data.memoryLimitMb,
     languages: data.languages.map((l) => ({ language: l.language, starterCode: l.starterCode })),
     conceptIds: data.concepts.map((c) => c.id),
+    transferQuestionId: data.transferQuestion?.id ?? null,
   };
 
   return (
@@ -124,7 +126,13 @@ function EditQuestion({ id }: { id: string }) {
         ) : null}
       </h1>
       {banner ? <Alert kind={banner.kind}>{banner.text}</Alert> : null}
-      <QuestionForm initial={initial} saving={saving} onSave={save} submitLabel="Save question" />
+      <QuestionForm
+        initial={initial}
+        questionId={id}
+        saving={saving}
+        onSave={save}
+        submitLabel="Save question"
+      />
       <TestCaseEditor question={data} onChanged={reload} />
       <RubricEditor question={data} onChanged={reload} />
     </div>
@@ -133,11 +141,14 @@ function EditQuestion({ id }: { id: string }) {
 
 function QuestionForm({
   initial,
+  questionId = null,
   saving,
   onSave,
   submitLabel,
 }: {
   initial: QuestionInput;
+  /** The question being edited; a question can never be its own transfer check. */
+  questionId?: string | null;
   saving: boolean;
   onSave: (input: QuestionInput) => void;
   submitLabel: string;
@@ -147,6 +158,11 @@ function QuestionForm({
     setForm((f) => ({ ...f, [key]: value }));
   // The concept vocabulary is small and instructor-authored; load it once.
   const concepts = useApi(() => instructorApi.listConcepts(), []);
+  // Candidate Transfer Check targets: the instructor's other questions.
+  const questions = useApi(() => instructorApi.listQuestions(), []);
+  const transferCandidates = (questions.data ?? []).filter(
+    (q) => q.id !== questionId && !q.isArchived,
+  );
 
   const selected = new Map(form.languages.map((l) => [l.language, l.starterCode ?? ""]));
   const chosenConcepts = new Set(form.conceptIds ?? []);
@@ -297,6 +313,23 @@ function QuestionForm({
           chosen={chosenConcepts}
           onToggle={toggleConcept}
         />
+
+        <Field
+          label="Transfer Check"
+          hint="Optional. A related question offered - with hints off, one attempt - once this one is solved. Its result is recorded separately from the score."
+        >
+          <Select
+            value={form.transferQuestionId ?? ""}
+            onChange={(e) => set("transferQuestionId", e.target.value || null)}
+          >
+            <option value="">None</option>
+            {transferCandidates.map((q) => (
+              <option key={q.id} value={q.id}>
+                {q.title}
+              </option>
+            ))}
+          </Select>
+        </Field>
 
         <Button type="submit" disabled={saving}>
           {saving ? "Saving…" : submitLabel}

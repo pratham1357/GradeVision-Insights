@@ -269,38 +269,46 @@ model AssessmentQuestion {
 // ---------------------------------------------------------------------------
 
 model Question {
-  id                String             @id @default(uuid(7)) @db.Uuid
-  title             String
-  statement         String
-  constraints       String?
-  inputFormat       String?
-  outputFormat      String?
-  difficulty        QuestionDifficulty @default(MEDIUM)
+  id                 String             @id @default(uuid(7)) @db.Uuid
+  title              String
+  statement          String
+  constraints        String?
+  inputFormat        String?
+  outputFormat       String?
+  difficulty         QuestionDifficulty @default(MEDIUM)
   // Advisory problem limits; concrete execution/sandbox config lives in the evaluator.
-  timeLimitMs       Int?
-  memoryLimitMb     Int?
-  isArchived        Boolean            @default(false)
+  timeLimitMs        Int?
+  memoryLimitMb      Int?
+  isArchived         Boolean            @default(false)
   // Informational-only pointer to a recognizable public problem (e.g. LeetCode) this
   // question is modelled after. Shape: { source, number, title, difficulty, url }.
   // Never used to fetch anything at runtime and never carries hidden tests/solutions.
-  externalReference Json?
-  createdById       String?            @db.Uuid
-  createdBy         User?              @relation("QuestionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  externalReference  Json?
+  createdById        String?            @db.Uuid
+  createdBy          User?              @relation("QuestionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  // Transfer Check: an instructor-chosen related question offered - with hints
+  // off - once this question's latest evaluated attempt passes. Optional, never
+  // auto-selected. Clearing it keeps any transfer submissions already made.
+  transferQuestionId String?            @db.Uuid
+  transferQuestion   Question?          @relation("QuestionTransfer", fields: [transferQuestionId], references: [id], onDelete: SetNull)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   languages           QuestionLanguage[]
   testCases           TestCase[]
   rubric              Rubric?
   assessmentQuestions AssessmentQuestion[]
-  submissions         Submission[]
+  submissions         Submission[]         @relation("SubmissionQuestion")
+  transferSubmissions Submission[]         @relation("SubmissionTransferSource")
   submissionDrafts    SubmissionDraft[]
   hintStages          HintStage[]
   hintUsages          HintUsage[]
   concepts            QuestionConcept[]
+  transferSourceOf    Question[]           @relation("QuestionTransfer")
 
   @@index([difficulty])
   @@index([isArchived])
+  @@index([transferQuestionId])
   @@map("questions")
 }
 
@@ -459,23 +467,29 @@ model ExamSession {
 // ---------------------------------------------------------------------------
 
 model Submission {
-  id            String              @id @default(uuid(7)) @db.Uuid
-  examSessionId String              @db.Uuid
-  examSession   ExamSession         @relation(fields: [examSessionId], references: [id], onDelete: Restrict)
-  questionId    String              @db.Uuid
-  question      Question            @relation(fields: [questionId], references: [id], onDelete: Restrict)
-  language      ProgrammingLanguage
-  sourceCode    String
-  attemptNumber Int
-  status        SubmissionStatus    @default(QUEUED)
-  isFinal       Boolean             @default(false)
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
+  id                       String              @id @default(uuid(7)) @db.Uuid
+  examSessionId            String              @db.Uuid
+  examSession              ExamSession         @relation(fields: [examSessionId], references: [id], onDelete: Restrict)
+  questionId               String              @db.Uuid
+  question                 Question            @relation("SubmissionQuestion", fields: [questionId], references: [id], onDelete: Restrict)
+  language                 ProgrammingLanguage
+  sourceCode               String
+  attemptNumber            Int
+  status                   SubmissionStatus    @default(QUEUED)
+  isFinal                  Boolean             @default(false)
+  // Set only on Transfer Check submissions: the assisted question this transfer
+  // was offered for (`questionId` is then the transfer question itself). Null
+  // for normal assessment submissions, which is what scoring iterates.
+  transferSourceQuestionId String?             @db.Uuid
+  transferSourceQuestion   Question?           @relation("SubmissionTransferSource", fields: [transferSourceQuestionId], references: [id], onDelete: Restrict)
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
 
   evaluationRuns EvaluationRun[]
 
   @@unique([examSessionId, questionId, attemptNumber])
   @@index([examSessionId, questionId])
+  @@index([examSessionId, transferSourceQuestionId])
   @@index([status])
   @@map("submissions")
 }

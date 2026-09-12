@@ -9,6 +9,7 @@ import { ExamPage } from "./pages/ExamPage";
 import { LoginPage } from "./pages/LoginPage";
 import { QuestionEditorPage } from "./pages/QuestionEditorPage";
 import { StudentDashboardPage } from "./pages/StudentDashboardPage";
+import { TransferCheckPage } from "./pages/TransferCheckPage";
 
 /**
  * Two authenticated areas - instructor authoring and student assessment-taking -
@@ -34,6 +35,10 @@ export function App() {
       <Route element={<RequireStudent />}>
         <Route path="/student" element={<StudentDashboardPage />} />
         <Route path="/student/exam/:sessionId" element={<ExamPage />} />
+        <Route
+          path="/student/exam/:sessionId/transfer/:questionId"
+          element={<TransferCheckPage />}
+        />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

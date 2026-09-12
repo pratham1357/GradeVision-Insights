@@ -9,6 +9,7 @@ import type {
   StudentAssessmentSummary,
   SubmissionResultView,
   SubmitResult,
+  TransferCheckView,
 } from "@gradevision/shared";
 
 import { apiRequest } from "./api-client";
@@ -50,6 +51,24 @@ export const studentApi = {
 
   getSubmissionResult: (submissionId: string) =>
     apiRequest<SubmissionResultView>(`/student/submissions/${submissionId}`),
+
+  // Transfer Check - `questionId` is always the source (assessment) question.
+  getTransferCheck: (sessionId: string, questionId: string) =>
+    apiRequest<TransferCheckView>(
+      `/student/sessions/${sessionId}/questions/${questionId}/transfer`,
+    ),
+
+  saveTransferDraft: (sessionId: string, questionId: string, body: CodePayload) =>
+    apiRequest<SaveDraftResult>(
+      `/student/sessions/${sessionId}/questions/${questionId}/transfer/draft`,
+      { method: "PUT", ...json(body) },
+    ),
+
+  submitTransfer: (sessionId: string, questionId: string, body: CodePayload) =>
+    apiRequest<SubmitResult>(
+      `/student/sessions/${sessionId}/questions/${questionId}/transfer/submissions`,
+      { method: "POST", ...json(body) },
+    ),
 
   listHints: (sessionId: string, questionId: string) =>
     apiRequest<QuestionHintsView>(`/student/sessions/${sessionId}/questions/${questionId}/hints`),

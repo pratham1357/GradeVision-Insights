@@ -377,7 +377,11 @@ describe("concepts", () => {
     const res = await request(app).get("/api/v1/concepts").set("Authorization", instructorA);
     expect(res.status).toBe(200);
     const listed: { id: string; name: string; description: string | null }[] = res.body.data;
-    expect(listed.map((c) => c.name)).toEqual([...listed.map((c) => c.name)].sort());
+    // Ordered by name (database collation - not JavaScript's code-unit sort).
+    const names = listed.map((c) => c.name);
+    expect(names.indexOf("AUTHZ Test Concept A")).toBeLessThan(
+      names.indexOf("AUTHZ Test Concept B"),
+    );
     expect(listed.find((c) => c.id === ID.conceptA)).toMatchObject({
       name: "AUTHZ Test Concept A",
       description: "fixture",

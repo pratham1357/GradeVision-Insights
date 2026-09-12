@@ -9,10 +9,13 @@ import {
   getQuestionHints,
   getSession,
   getSubmissionResult,
+  getTransferCheck,
   requestHint,
   saveDraft,
+  saveTransferDraft,
   startSession,
   submitCode,
+  submitTransfer,
 } from "./student.service.js";
 
 /** `GET /api/v1/student/assessments` - ACTIVE assessments the student may take. */
@@ -56,6 +59,41 @@ export async function saveQuestionDraft(req: Request, res: Response): Promise<vo
 export async function submitQuestion(req: Request, res: Response): Promise<void> {
   const { userId } = getAuthContext(req);
   const result = await submitCode(
+    pathParam(req, "sessionId"),
+    pathParam(req, "questionId"),
+    req.body as SubmitInput,
+    userId,
+  );
+  sendData(res, result, 201);
+}
+
+/** `GET /api/v1/student/sessions/:sessionId/questions/:questionId/transfer` - the Transfer Check task. */
+export async function getQuestionTransferCheck(req: Request, res: Response): Promise<void> {
+  const { userId } = getAuthContext(req);
+  sendData(
+    res,
+    await getTransferCheck(pathParam(req, "sessionId"), pathParam(req, "questionId"), userId),
+  );
+}
+
+/** `PUT .../questions/:questionId/transfer/draft` - autosave the transfer solution. */
+export async function saveTransferQuestionDraft(req: Request, res: Response): Promise<void> {
+  const { userId } = getAuthContext(req);
+  sendData(
+    res,
+    await saveTransferDraft(
+      pathParam(req, "sessionId"),
+      pathParam(req, "questionId"),
+      req.body as SaveDraftInput,
+      userId,
+    ),
+  );
+}
+
+/** `POST .../questions/:questionId/transfer/submissions` - the single transfer attempt. */
+export async function submitTransferQuestion(req: Request, res: Response): Promise<void> {
+  const { userId } = getAuthContext(req);
+  const result = await submitTransfer(
     pathParam(req, "sessionId"),
     pathParam(req, "questionId"),
     req.body as SubmitInput,

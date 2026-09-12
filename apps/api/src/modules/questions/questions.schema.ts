@@ -39,6 +39,9 @@ const questionCore = {
   // omitted by older clients: omitted on update = leave associations unchanged,
   // omitted on create = none. The service verifies every id exists.
   conceptIds: z.array(z.uuid()).max(20).optional(),
+  // Transfer Check target: another question of this instructor's, offered with
+  // hints off once this question is solved. Omitted = unchanged; null = none.
+  transferQuestionId: z.uuid().nullable().optional(),
 };
 
 function uniqueLanguages(entries: { language: string }[]): boolean {

@@ -326,6 +326,24 @@ function SessionDetail({
                 </>
               ) : null}
               <CodeViewer versions={q.versions} />
+              {q.transferCheck ? (
+                <p className="mt-2 border-t border-neutral-100 pt-2 text-xs text-neutral-600">
+                  <span className="font-medium">Transfer Check</span> ({q.transferCheck.title}):{" "}
+                  {q.transferCheck.result === "PASSED"
+                    ? "completed independently"
+                    : q.transferCheck.result === "FAILED"
+                      ? "not completed"
+                      : q.transferCheck.result === "PENDING"
+                        ? "being evaluated"
+                        : q.transferCheck.result === "NOT_EVALUATED"
+                          ? "could not be evaluated"
+                          : "not attempted"}
+                  {q.transferCheck.testsTotal !== null
+                    ? ` · ${q.transferCheck.testsPassed}/${q.transferCheck.testsTotal} tests`
+                    : ""}{" "}
+                  · not part of the score
+                </p>
+              ) : null}
             </div>
           ))}
 

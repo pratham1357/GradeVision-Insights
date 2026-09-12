@@ -49,6 +49,8 @@ export interface QuestionInput {
   languages: { language: ProgrammingLanguage; starterCode?: string | null }[];
   /** Concept ids from `listConcepts`. Omit to leave a question's concepts unchanged. */
   conceptIds?: string[];
+  /** Transfer Check question id; `null` = none. Omit to leave unchanged. */
+  transferQuestionId?: string | null;
 }
 
 export interface TestCaseInput {

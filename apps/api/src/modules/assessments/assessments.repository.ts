@@ -108,6 +108,42 @@ export function detachQuestion(assessmentId: string, questionId: string) {
   });
 }
 
+/**
+ * Questions in the assessment whose Transfer Check target is also in it (or
+ * would be, if `candidateQuestionId` were attached). A question and its
+ * transfer check must never share an assessment: the transfer task would then
+ * be an ordinary, hint-enabled, marked question.
+ */
+export async function findTransferConflicts(
+  assessmentId: string,
+  candidateQuestionId?: string,
+): Promise<{ questionId: string; transferQuestionId: string }[]> {
+  const links = await prisma.assessmentQuestion.findMany({
+    where: { assessmentId },
+    select: { questionId: true, question: { select: { transferQuestionId: true } } },
+  });
+  const ids = new Set(links.map((l) => l.questionId));
+  const pairs = links.map((l) => ({
+    questionId: l.questionId,
+    transferQuestionId: l.question.transferQuestionId,
+  }));
+  if (candidateQuestionId) {
+    const candidate = await prisma.question.findUnique({
+      where: { id: candidateQuestionId },
+      select: { transferQuestionId: true },
+    });
+    ids.add(candidateQuestionId);
+    pairs.push({
+      questionId: candidateQuestionId,
+      transferQuestionId: candidate?.transferQuestionId ?? null,
+    });
+  }
+  return pairs.filter(
+    (p): p is { questionId: string; transferQuestionId: string } =>
+      p.transferQuestionId !== null && ids.has(p.transferQuestionId),
+  );
+}
+
 export function listAssessmentQuestionIds(assessmentId: string) {
   return prisma.assessmentQuestion.findMany({
     where: { assessmentId },
@@ -177,7 +213,15 @@ export function loadAssessmentSessionResult(
           id: true,
           questions: {
             orderBy: { position: "asc" },
-            include: { question: { select: { id: true, title: true } } },
+            include: {
+              question: {
+                select: {
+                  id: true,
+                  title: true,
+                  transferQuestion: { select: { id: true, title: true } },
+                },
+              },
+            },
           },
         },
       },

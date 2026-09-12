@@ -73,6 +73,33 @@ export interface ExamSubmissionSummary {
   evaluation: SubmissionEvaluationSummary | null;
 }
 
+/**
+ * Factual outcome of a Transfer Check attempt, read from its persisted
+ * evaluation: no score, no mastery. `NOT_EVALUATED` = the grader failed, which
+ * is not the student's doing and does not consume the attempt.
+ */
+export type TransferCheckResult = "PASSED" | "FAILED" | "PENDING" | "NOT_EVALUATED";
+
+/**
+ * The Transfer Check attached to an assessment question: a related question
+ * the student may attempt - with hints off - once this question is solved.
+ * Reported separately from the assessment score.
+ */
+export interface ExamTransferCheck {
+  /** The transfer question (a normal question; never part of this assessment). */
+  questionId: string;
+  title: string;
+  /** Concept labels of the transfer question, for display. */
+  concepts: string[];
+  /** The source question is solved (latest evaluated attempt passed every test). */
+  available: boolean;
+  lockedReason: string | null;
+  /** A counted attempt exists (pending or graded). One attempt only. */
+  attempted: boolean;
+  submission: ExamSubmissionSummary | null;
+  result: TransferCheckResult | null;
+}
+
 export interface ExamQuestion {
   id: string;
   position: number;
@@ -95,6 +122,18 @@ export interface ExamQuestion {
   draft: { language: ProgrammingLanguage; sourceCode: string; updatedAt: string } | null;
   /** Every submission the student has made for this question in this session (newest first). */
   submissions: ExamSubmissionSummary[];
+  /** Present when the instructor attached a Transfer Check to this question. */
+  transferCheck: ExamTransferCheck | null;
+}
+
+/** `GET /api/v1/student/sessions/:sessionId/questions/:questionId/transfer`. */
+export interface TransferCheckView {
+  sourceQuestionId: string;
+  sourceTitle: string;
+  /** The transfer question's content, draft and transfer submissions (position/points are 0). */
+  question: ExamQuestion;
+  transfer: ExamTransferCheck;
+  timing: SessionTiming;
 }
 
 export interface ExamSessionView {
