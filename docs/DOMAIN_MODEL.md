@@ -153,3 +153,21 @@ Ephemeral, per-connection, reconstructable → Redis.
 - **LLM hints** — `HintStage`/`HintUsage` are configuration and usage logs only.
 - **Redis / live-session models**, WebSockets, API CRUD, and UI.
 - **Secrets** — no API keys, DB passwords, or Judge0 credentials in the schema.
+
+## 9. Concepts: instructor-authored labels (`Concept`, `QuestionConcept`)
+
+A `Concept` is a reusable programming concept ("Recursion", "Hash Maps") and
+`QuestionConcept` is the explicit many-to-many join to `Question` (same shape as
+`AssessmentQuestion`: its own id plus `@@unique([questionId, conceptId])`).
+Removing a question cascades its associations; a concept that is still attached
+to a question cannot be deleted (`Restrict`).
+
+Concepts are **instructor-authored metadata, never inferred**: no hierarchy,
+prerequisites, weights, mastery or confidence scores, and nothing tags a
+question automatically. Instructors assign them through the question endpoints
+(`conceptIds` on create/update, omitted = unchanged) and read the vocabulary
+from `GET /api/v1/concepts`. Students never read or mutate them.
+
+The join exists so later layers can aggregate persisted evidence per concept -
+`Student -> Submission -> Question -> QuestionConcept -> Concept` - without a
+further schema change. That aggregation is deliberately not built yet.

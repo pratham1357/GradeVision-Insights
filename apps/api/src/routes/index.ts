@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { assessmentsRouter } from "../modules/assessments/assessments.routes.js";
 import { authRouter } from "../modules/auth/auth.routes.js";
+import { conceptsRouter } from "../modules/concepts/concepts.routes.js";
 import { coursesRouter } from "../modules/courses/courses.routes.js";
 import { healthRouter } from "../modules/health/health.routes.js";
 import { monitoringRouter } from "../modules/monitoring/monitoring.routes.js";
@@ -25,5 +26,6 @@ apiRouter.use("/users", usersRouter);
 apiRouter.use("/courses", coursesRouter);
 apiRouter.use("/assessments", assessmentsRouter);
 apiRouter.use("/questions", questionsRouter);
+apiRouter.use("/concepts", conceptsRouter);
 apiRouter.use("/monitoring", monitoringRouter);
 apiRouter.use("/student", studentRouter);

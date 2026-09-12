@@ -297,10 +297,47 @@ model Question {
   submissionDrafts    SubmissionDraft[]
   hintStages          HintStage[]
   hintUsages          HintUsage[]
+  concepts            QuestionConcept[]
 
   @@index([difficulty])
   @@index([isArchived])
   @@map("questions")
+}
+
+// ---------------------------------------------------------------------------
+// C2. Concepts (instructor-authored labels; Question <-> Concept many-to-many)
+// ---------------------------------------------------------------------------
+
+// A reusable programming concept ("Recursion", "Hash Maps"). Plain metadata:
+// no hierarchy, weights, mastery or inference - instructors attach concepts to
+// questions so evidence can later be aggregated per concept
+// (Student -> Submission -> Question -> QuestionConcept -> Concept).
+model Concept {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  // Canonical display name; unique so labels stay auditable across questions.
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  questions QuestionConcept[]
+
+  @@map("concepts")
+}
+
+// Explicit join between Question and Concept (same shape as AssessmentQuestion).
+// Removing a question drops its labels; a concept in use cannot be deleted.
+model QuestionConcept {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  questionId String   @db.Uuid
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  conceptId  String   @db.Uuid
+  concept    Concept  @relation(fields: [conceptId], references: [id], onDelete: Restrict)
+  createdAt  DateTime @default(now())
+
+  @@unique([questionId, conceptId])
+  @@index([conceptId])
+  @@map("question_concepts")
 }
 
 // Per-question language enablement + starter code. Avoids a JSON blob and an enum array.

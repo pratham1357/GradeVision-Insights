@@ -35,6 +35,10 @@ const detailInclude = {
   languages: { orderBy: { language: "asc" } },
   testCases: { orderBy: { position: "asc" } },
   rubric: { include: { criteria: { orderBy: { position: "asc" } } } },
+  concepts: {
+    orderBy: { concept: { name: "asc" } },
+    select: { concept: { select: { id: true, name: true, description: true } } },
+  },
 } satisfies Prisma.QuestionInclude;
 
 export function listInstructorQuestions(instructorId: string) {
@@ -64,21 +68,28 @@ export function createQuestion(
   scalars: QuestionScalarInput,
   createdById: string,
   languages: QuestionLanguageInput[],
+  conceptIds: string[] = [],
 ) {
   return prisma.question.create({
     data: {
       ...scalars,
       createdById,
       languages: { create: languages.map((l) => ({ ...l })) },
+      concepts: { create: conceptIds.map((conceptId) => ({ conceptId })) },
     },
     include: detailInclude,
   });
 }
 
+/**
+ * `conceptIds` undefined = leave the question's concept associations untouched
+ * (older clients never send the field); an array replaces the whole set.
+ */
 export function updateQuestion(
   questionId: string,
   scalars: QuestionScalarInput,
   languages: QuestionLanguageInput[],
+  conceptIds?: string[],
 ) {
   return prisma.$transaction(async (tx) => {
     await tx.question.update({ where: { id: questionId }, data: scalars });
@@ -87,6 +98,14 @@ export function updateQuestion(
       await tx.questionLanguage.createMany({
         data: languages.map((l) => ({ questionId, ...l })),
       });
+    }
+    if (conceptIds !== undefined) {
+      await tx.questionConcept.deleteMany({ where: { questionId } });
+      if (conceptIds.length > 0) {
+        await tx.questionConcept.createMany({
+          data: conceptIds.map((conceptId) => ({ questionId, conceptId })),
+        });
+      }
     }
     return tx.question.findUniqueOrThrow({ where: { id: questionId }, include: detailInclude });
   });

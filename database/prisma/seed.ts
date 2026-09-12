@@ -89,6 +89,15 @@ const ids = {
   q5CriterionFunctional: "00000000-0000-4000-8000-000000000131",
   q5CriterionApproach: "00000000-0000-4000-8000-000000000132",
   q5CriterionQuality: "00000000-0000-4000-8000-000000000133",
+  // --- Concepts (instructor-authored labels attached to the questions above) ---
+  conceptInputParsing: "00000000-0000-4000-8000-000000000200",
+  conceptArithmetic: "00000000-0000-4000-8000-000000000201",
+  conceptStrings: "00000000-0000-4000-8000-000000000202",
+  conceptArrays: "00000000-0000-4000-8000-000000000203",
+  conceptLoops: "00000000-0000-4000-8000-000000000204",
+  conceptConditionals: "00000000-0000-4000-8000-000000000205",
+  conceptHashMaps: "00000000-0000-4000-8000-000000000206",
+  conceptStacks: "00000000-0000-4000-8000-000000000207",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -981,6 +990,73 @@ async function main(): Promise<void> {
       },
       create: stage,
     });
+  }
+
+  // Concepts: a small canonical vocabulary, each one genuinely exercised by at
+  // least one seeded question. Labels are instructor-authored metadata - they
+  // say what a question is about, not what a student has mastered.
+  const concepts: { id: string; name: string; description: string }[] = [
+    {
+      id: ids.conceptInputParsing,
+      name: "Input Parsing",
+      description: "Reading and converting values from standard input.",
+    },
+    {
+      id: ids.conceptArithmetic,
+      name: "Arithmetic",
+      description: "Integer arithmetic and digit manipulation.",
+    },
+    {
+      id: ids.conceptStrings,
+      name: "Strings",
+      description: "Building, formatting and scanning strings.",
+    },
+    {
+      id: ids.conceptArrays,
+      name: "Arrays",
+      description: "Indexed sequences and positional access.",
+    },
+    { id: ids.conceptLoops, name: "Loops", description: "Iterating over input or a range." },
+    {
+      id: ids.conceptConditionals,
+      name: "Conditionals",
+      description: "Branching on a property of the input.",
+    },
+    {
+      id: ids.conceptHashMaps,
+      name: "Hash Maps",
+      description: "Constant-time lookup by key (dictionary / object / map).",
+    },
+    {
+      id: ids.conceptStacks,
+      name: "Stacks",
+      description: "Last-in, first-out matching and nesting.",
+    },
+  ];
+  for (const concept of concepts) {
+    await prisma.concept.upsert({
+      where: { id: concept.id },
+      update: { name: concept.name, description: concept.description },
+      create: concept,
+    });
+  }
+
+  // Question <-> Concept associations, from what each seeded statement asks for.
+  const questionConcepts: [string, string[]][] = [
+    [question.id, [ids.conceptInputParsing, ids.conceptArithmetic]], // Sum of Two Integers
+    [question2.id, [ids.conceptInputParsing, ids.conceptStrings]], // Greet by Name
+    [question3.id, [ids.conceptArrays, ids.conceptLoops, ids.conceptHashMaps]], // Two Sum
+    [question4.id, [ids.conceptStrings, ids.conceptLoops, ids.conceptStacks]], // Valid Parentheses
+    [question5.id, [ids.conceptArithmetic, ids.conceptConditionals, ids.conceptStrings]], // Palindrome Number
+  ];
+  for (const [questionId, conceptIds] of questionConcepts) {
+    for (const conceptId of conceptIds) {
+      await prisma.questionConcept.upsert({
+        where: { questionId_conceptId: { questionId, conceptId } },
+        update: {},
+        create: { questionId, conceptId },
+      });
+    }
   }
 
   console.log("Seed complete:", {

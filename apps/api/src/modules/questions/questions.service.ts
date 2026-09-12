@@ -1,4 +1,5 @@
 import type {
+  ConceptDto,
   ExternalProblemReference,
   QuestionDetail,
   QuestionLanguageDto,
@@ -8,6 +9,7 @@ import type {
 } from "@gradevision/shared";
 
 import { ApiError } from "../../utils/api-error.js";
+import { findExistingConceptIds } from "../concepts/concepts.repository.js";
 import {
   createQuestion,
   createTestCase,
@@ -70,6 +72,10 @@ function toLanguage(row: DetailRow["languages"][number]): QuestionLanguageDto {
   return { language: row.language, starterCode: row.starterCode, isEnabled: row.isEnabled };
 }
 
+function toConcept(row: DetailRow["concepts"][number]): ConceptDto {
+  return { id: row.concept.id, name: row.concept.name, description: row.concept.description };
+}
+
 function toRubric(row: RubricRow): RubricDto {
   if (!row) {
     return { id: null, name: null, description: null, criteria: [] };
@@ -104,6 +110,7 @@ function toDetail(row: DetailRow): QuestionDetail {
     languages: row.languages.map(toLanguage),
     testCases: row.testCases.map(toTestCase),
     rubric: toRubric(row.rubric),
+    concepts: row.concepts.map(toConcept),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     externalReference: toExternalReference(row.externalReference),
@@ -164,15 +171,28 @@ function splitQuestionInput(input: CreateQuestionInput) {
       language: l.language,
       starterCode: l.starterCode ?? null,
     })),
+    // Deduplicated so a repeated id cannot trip the unique constraint.
+    conceptIds: input.conceptIds === undefined ? undefined : [...new Set(input.conceptIds)],
   };
+}
+
+/** Client-supplied concept ids are never trusted: every one must exist. */
+async function assertConceptsExist(conceptIds: string[] | undefined): Promise<void> {
+  if (!conceptIds || conceptIds.length === 0) return;
+  const existing = new Set((await findExistingConceptIds(conceptIds)).map((c) => c.id));
+  const unknown = conceptIds.filter((id) => !existing.has(id));
+  if (unknown.length > 0) {
+    throw ApiError.badRequest(`Unknown concept id${unknown.length === 1 ? "" : "s"}`);
+  }
 }
 
 export async function createInstructorQuestion(
   input: CreateQuestionInput,
   instructorId: string,
 ): Promise<QuestionDetail> {
-  const { scalars, languages } = splitQuestionInput(input);
-  return toDetail(await createQuestion(scalars, instructorId, languages));
+  const { scalars, languages, conceptIds } = splitQuestionInput(input);
+  await assertConceptsExist(conceptIds);
+  return toDetail(await createQuestion(scalars, instructorId, languages, conceptIds ?? []));
 }
 
 export async function updateInstructorQuestion(
@@ -181,8 +201,9 @@ export async function updateInstructorQuestion(
   instructorId: string,
 ): Promise<QuestionDetail> {
   await assertQuestionOwner(questionId, instructorId);
-  const { scalars, languages } = splitQuestionInput(input);
-  return toDetail(await updateQuestion(questionId, scalars, languages));
+  const { scalars, languages, conceptIds } = splitQuestionInput(input);
+  await assertConceptsExist(conceptIds);
+  return toDetail(await updateQuestion(questionId, scalars, languages, conceptIds));
 }
 
 export async function addTestCase(

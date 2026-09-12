@@ -21,6 +21,8 @@ const ID = {
   course: "ffffffff-ffff-4fff-8fff-000000000010",
   sectionA: "ffffffff-ffff-4fff-8fff-000000000020",
   sectionB: "ffffffff-ffff-4fff-8fff-000000000021",
+  conceptA: "ffffffff-ffff-4fff-8fff-000000000030",
+  conceptB: "ffffffff-ffff-4fff-8fff-000000000031",
 } as const;
 
 async function cleanup(): Promise<void> {
@@ -30,6 +32,8 @@ async function cleanup(): Promise<void> {
   await prisma.question.deleteMany({
     where: { createdById: { in: [ID.instructorA, ID.instructorB] } },
   });
+  // After the questions: a concept still attached to one cannot be deleted.
+  await prisma.concept.deleteMany({ where: { id: { in: [ID.conceptA, ID.conceptB] } } });
   await prisma.section.deleteMany({ where: { id: { in: [ID.sectionA, ID.sectionB] } } });
   await prisma.course.deleteMany({ where: { id: ID.course } });
   await prisma.user.deleteMany({
@@ -72,6 +76,13 @@ beforeAll(async () => {
     data: [
       { id: ID.sectionA, courseId: ID.course, name: "Section A", instructorId: ID.instructorA },
       { id: ID.sectionB, courseId: ID.course, name: "Section B", instructorId: ID.instructorB },
+    ],
+  });
+
+  await prisma.concept.createMany({
+    data: [
+      { id: ID.conceptA, name: "AUTHZ Test Concept A", description: "fixture" },
+      { id: ID.conceptB, name: "AUTHZ Test Concept B", description: null },
     ],
   });
 
@@ -354,5 +365,149 @@ describe("questions, test cases, rubric", () => {
       .send({ orderedQuestionIds: [secondId, questionId] });
     expect(reordered.body.data.questions[0].questionId).toBe(secondId);
     expect(reordered.body.data.questions[0].points).toBe(30);
+  });
+});
+
+describe("concepts", () => {
+  const body = { title: "Labelled", statement: "s", difficulty: "EASY", languages: [] };
+  const names = (res: { body: { data: { concepts: { name: string }[] } } }) =>
+    res.body.data.concepts.map((c) => c.name);
+
+  it("lists the concept vocabulary for instructors only", async () => {
+    const res = await request(app).get("/api/v1/concepts").set("Authorization", instructorA);
+    expect(res.status).toBe(200);
+    const listed: { id: string; name: string; description: string | null }[] = res.body.data;
+    expect(listed.map((c) => c.name)).toEqual([...listed.map((c) => c.name)].sort());
+    expect(listed.find((c) => c.id === ID.conceptA)).toMatchObject({
+      name: "AUTHZ Test Concept A",
+      description: "fixture",
+    });
+    expect((await request(app).get("/api/v1/concepts").set("Authorization", student)).status).toBe(
+      403,
+    );
+    expect((await request(app).get("/api/v1/concepts")).status).toBe(401);
+  });
+
+  it("creates a question with concepts and returns them alphabetically", async () => {
+    const res = await request(app)
+      .post("/api/v1/questions")
+      .set("Authorization", instructorA)
+      .send({ ...body, conceptIds: [ID.conceptB, ID.conceptA] });
+    expect(res.status).toBe(201);
+    expect(names(res)).toEqual(["AUTHZ Test Concept A", "AUTHZ Test Concept B"]);
+
+    const reloaded = await request(app)
+      .get(`/api/v1/questions/${res.body.data.id}`)
+      .set("Authorization", instructorA);
+    expect(names(reloaded)).toEqual(["AUTHZ Test Concept A", "AUTHZ Test Concept B"]);
+  });
+
+  it("creating without conceptIds still works and yields no concepts", async () => {
+    const res = await request(app)
+      .post("/api/v1/questions")
+      .set("Authorization", instructorA)
+      .send(body);
+    expect(res.status).toBe(201);
+    expect(res.body.data.concepts).toEqual([]);
+  });
+
+  it("replaces the set on update, removes a concept, and leaves it untouched when omitted", async () => {
+    const created = await request(app)
+      .post("/api/v1/questions")
+      .set("Authorization", instructorA)
+      .send({ ...body, conceptIds: [ID.conceptA, ID.conceptB] });
+    const id: string = created.body.data.id;
+    const url = `/api/v1/questions/${id}`;
+
+    // Omitted -> unchanged (older clients never send the field).
+    const untouched = await request(app).put(url).set("Authorization", instructorA).send(body);
+    expect(untouched.status).toBe(200);
+    expect(names(untouched)).toEqual(["AUTHZ Test Concept A", "AUTHZ Test Concept B"]);
+
+    // Remove one by sending the remaining set.
+    const removed = await request(app)
+      .put(url)
+      .set("Authorization", instructorA)
+      .send({ ...body, conceptIds: [ID.conceptB] });
+    expect(names(removed)).toEqual(["AUTHZ Test Concept B"]);
+    expect(await prisma.questionConcept.count({ where: { questionId: id } })).toBe(1);
+
+    // Empty array clears everything.
+    const cleared = await request(app)
+      .put(url)
+      .set("Authorization", instructorA)
+      .send({ ...body, conceptIds: [] });
+    expect(cleared.body.data.concepts).toEqual([]);
+  });
+
+  it("rejects unknown concept ids with 400 and de-duplicates repeated ids", async () => {
+    const unknown = await request(app)
+      .post("/api/v1/questions")
+      .set("Authorization", instructorA)
+      .send({ ...body, conceptIds: [ID.conceptA, "ffffffff-ffff-4fff-8fff-0000000000ee"] });
+    expect(unknown.status).toBe(400);
+    expect(unknown.body.error.message).toMatch(/Unknown concept id/);
+
+    const malformed = await request(app)
+      .post("/api/v1/questions")
+      .set("Authorization", instructorA)
+      .send({ ...body, conceptIds: ["not-a-uuid"] });
+    expect(malformed.status).toBe(400);
+
+    const deduped = await request(app)
+      .post("/api/v1/questions")
+      .set("Authorization", instructorA)
+      .send({ ...body, conceptIds: [ID.conceptA, ID.conceptA] });
+    expect(deduped.status).toBe(201);
+    expect(names(deduped)).toEqual(["AUTHZ Test Concept A"]);
+  });
+
+  it("students and other instructors cannot label the question", async () => {
+    const created = await request(app)
+      .post("/api/v1/questions")
+      .set("Authorization", instructorA)
+      .send(body);
+    const url = `/api/v1/questions/${created.body.data.id}`;
+    const asStudent = await request(app)
+      .put(url)
+      .set("Authorization", student)
+      .send({ ...body, conceptIds: [ID.conceptA] });
+    expect(asStudent.status).toBe(403);
+    const asOther = await request(app)
+      .put(url)
+      .set("Authorization", instructorB)
+      .send({ ...body, conceptIds: [ID.conceptA] });
+    expect(asOther.status).toBe(404);
+    expect(
+      await prisma.questionConcept.count({ where: { questionId: created.body.data.id } }),
+    ).toBe(0);
+  });
+
+  it("database: unique concept names, unique associations, cascade on question delete, restrict on concept delete", async () => {
+    await expect(
+      prisma.concept.create({ data: { name: "AUTHZ Test Concept A" } }),
+    ).rejects.toMatchObject({ code: "P2002" });
+
+    const question = await prisma.question.create({
+      data: {
+        title: "DB-level",
+        statement: "s",
+        difficulty: "EASY",
+        createdById: ID.instructorA,
+        concepts: { create: [{ conceptId: ID.conceptA }] },
+      },
+    });
+    await expect(
+      prisma.questionConcept.create({ data: { questionId: question.id, conceptId: ID.conceptA } }),
+    ).rejects.toMatchObject({ code: "P2002" });
+
+    // A concept in use cannot be deleted...
+    await expect(prisma.concept.delete({ where: { id: ID.conceptA } })).rejects.toMatchObject({
+      code: "P2003",
+    });
+    // ...but deleting the question removes its associations.
+    await prisma.question.delete({ where: { id: question.id } });
+    expect(await prisma.questionConcept.count({ where: { questionId: question.id } })).toBe(0);
+    expect(await prisma.concept.count({ where: { id: ID.conceptA } })).toBe(1);
   });
 });

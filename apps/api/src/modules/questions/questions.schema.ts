@@ -35,6 +35,10 @@ const questionCore = {
   memoryLimitMb: z.number().int().positive().max(4096).nullish(),
   // At most one entry per language; enforced below.
   languages: z.array(languageEntry).max(PROGRAMMING_LANGUAGES.length),
+  // Instructor-authored concept labels (ids from `GET /concepts`). Optional and
+  // omitted by older clients: omitted on update = leave associations unchanged,
+  // omitted on create = none. The service verifies every id exists.
+  conceptIds: z.array(z.uuid()).max(20).optional(),
 };
 
 function uniqueLanguages(entries: { language: string }[]): boolean {

@@ -105,6 +105,16 @@ export interface ExternalProblemReference {
   url: string | null;
 }
 
+/**
+ * A programming concept ("Recursion", "Hash Maps"): instructor-authored label
+ * metadata attached to questions. Not an inferred learning state.
+ */
+export interface ConceptDto {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
 export interface QuestionSummary {
   id: string;
   title: string;
@@ -165,6 +175,8 @@ export interface QuestionDetail {
   languages: QuestionLanguageDto[];
   testCases: TestCaseDto[];
   rubric: RubricDto;
+  /** Concepts this question involves, alphabetical. Empty when none are assigned. */
+  concepts: ConceptDto[];
   createdAt: string;
   updatedAt: string;
   externalReference: ExternalProblemReference | null;

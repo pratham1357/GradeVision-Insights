@@ -8,6 +8,7 @@ import type {
   InstructorStudentMonitor,
   ProgrammingLanguage,
   SystemMetrics,
+  ConceptDto,
   QuestionDetail,
   QuestionSummary,
   QuestionDifficulty,
@@ -46,6 +47,8 @@ export interface QuestionInput {
   timeLimitMs?: number | null;
   memoryLimitMb?: number | null;
   languages: { language: ProgrammingLanguage; starterCode?: string | null }[];
+  /** Concept ids from `listConcepts`. Omit to leave a question's concepts unchanged. */
+  conceptIds?: string[];
 }
 
 export interface TestCaseInput {
@@ -114,6 +117,7 @@ export const instructorApi = {
       ...json({ orderedQuestionIds }),
     }),
 
+  listConcepts: () => apiRequest<ConceptDto[]>("/concepts"),
   listQuestions: () => apiRequest<QuestionSummary[]>("/questions"),
   getQuestion: (id: string) => apiRequest<QuestionDetail>(`/questions/${id}`),
   createQuestion: (body: QuestionInput) =>

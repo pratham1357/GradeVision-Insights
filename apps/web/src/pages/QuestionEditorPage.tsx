@@ -2,6 +2,7 @@ import {
   PROGRAMMING_LANGUAGES,
   QUESTION_DIFFICULTIES,
   RUBRIC_CRITERION_TYPES,
+  type ConceptDto,
   type ProgrammingLanguage,
   type QuestionDetail,
   type RubricCriterionType,
@@ -36,6 +37,7 @@ const EMPTY: QuestionInput = {
   timeLimitMs: null,
   memoryLimitMb: null,
   languages: [],
+  conceptIds: [],
 };
 
 export function QuestionEditorPage() {
@@ -105,6 +107,7 @@ function EditQuestion({ id }: { id: string }) {
     timeLimitMs: data.timeLimitMs,
     memoryLimitMb: data.memoryLimitMb,
     languages: data.languages.map((l) => ({ language: l.language, starterCode: l.starterCode })),
+    conceptIds: data.concepts.map((c) => c.id),
   };
 
   return (
@@ -142,8 +145,23 @@ function QuestionForm({
   const [form, setForm] = useState(initial);
   const set = <K extends keyof QuestionInput>(key: K, value: QuestionInput[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
+  // The concept vocabulary is small and instructor-authored; load it once.
+  const concepts = useApi(() => instructorApi.listConcepts(), []);
 
   const selected = new Map(form.languages.map((l) => [l.language, l.starterCode ?? ""]));
+  const chosenConcepts = new Set(form.conceptIds ?? []);
+
+  function toggleConcept(conceptId: string, on: boolean) {
+    setForm((f) => {
+      const current = f.conceptIds ?? [];
+      return {
+        ...f,
+        conceptIds: on
+          ? [...current.filter((id) => id !== conceptId), conceptId]
+          : current.filter((id) => id !== conceptId),
+      };
+    });
+  }
 
   function toggleLanguage(language: ProgrammingLanguage, on: boolean) {
     setForm((f) => ({
@@ -272,11 +290,78 @@ function QuestionForm({
           })}
         </fieldset>
 
+        <ConceptPicker
+          concepts={concepts.data ?? null}
+          loading={concepts.loading}
+          error={concepts.error}
+          chosen={chosenConcepts}
+          onToggle={toggleConcept}
+        />
+
         <Button type="submit" disabled={saving}>
           {saving ? "Saving…" : submitLabel}
         </Button>
       </form>
     </Card>
+  );
+}
+
+/**
+ * Simple multi-select over the concept vocabulary: one checkbox chip per
+ * concept. Labels only - there is no hierarchy, weighting or inference here.
+ */
+function ConceptPicker({
+  concepts,
+  loading,
+  error,
+  chosen,
+  onToggle,
+}: {
+  concepts: ConceptDto[] | null;
+  loading: boolean;
+  error: string | null;
+  chosen: Set<string>;
+  onToggle: (conceptId: string, on: boolean) => void;
+}) {
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-sm font-medium text-neutral-700">Concepts</legend>
+      <p className="text-xs text-neutral-500">
+        What this question is about (used later to group evidence by concept). Optional.
+      </p>
+      {error ? <Alert kind="error">{error}</Alert> : null}
+      {loading && !concepts ? (
+        <p className="text-xs text-neutral-400">Loading concepts…</p>
+      ) : !concepts || concepts.length === 0 ? (
+        <p className="text-xs text-neutral-400">No concepts are defined yet.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {concepts.map((concept) => {
+            const on = chosen.has(concept.id);
+            return (
+              <label
+                key={concept.id}
+                title={concept.description ?? undefined}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-sm ${
+                  on
+                    ? "border-blue-600 bg-blue-50 text-blue-800"
+                    : "border-neutral-200 bg-white text-neutral-700"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={on}
+                  onChange={(e) => onToggle(concept.id, e.target.checked)}
+                />
+                {on ? "✓ " : ""}
+                {concept.name}
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </fieldset>
   );
 }
 
