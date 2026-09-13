@@ -1,4 +1,5 @@
 import type { AssessmentStatus } from "@gradevision/shared";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { instructorApi } from "../lib/instructor-api";
@@ -18,6 +19,12 @@ export function DashboardPage() {
   const courses = useApi(() => instructorApi.listCourses(), []);
   const assessments = useApi(() => instructorApi.listAssessments(), []);
   const questions = useApi(() => instructorApi.listQuestions(), []);
+  // Archived assessments stay reachable but out of the way: the live and draft
+  // ones are what an instructor works with day to day.
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedCount = assessments.data?.filter((a) => a.status === "ARCHIVED").length ?? 0;
+  const visibleAssessments =
+    assessments.data?.filter((a) => showArchived || a.status !== "ARCHIVED") ?? [];
 
   return (
     <div className="space-y-5">
@@ -72,7 +79,20 @@ export function DashboardPage() {
 
       <StudentMonitorCard />
 
-      <Card title="Assessments">
+      <Card
+        title="Assessments"
+        actions={
+          archivedCount > 0 ? (
+            <button
+              type="button"
+              className="text-xs text-blue-700 hover:underline"
+              onClick={() => setShowArchived((v) => !v)}
+            >
+              {showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
+            </button>
+          ) : null
+        }
+      >
         {assessments.loading ? (
           <Spinner />
         ) : assessments.error ? (
@@ -81,6 +101,10 @@ export function DashboardPage() {
           </Alert>
         ) : !assessments.data?.length ? (
           <EmptyState>No assessments yet. Create one to get started.</EmptyState>
+        ) : visibleAssessments.length === 0 ? (
+          <EmptyState>
+            Only archived assessments exist. Create one, or show the archived ones.
+          </EmptyState>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -95,7 +119,7 @@ export function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {assessments.data.map((a) => (
+                {visibleAssessments.map((a) => (
                   <tr key={a.id} className="border-t border-neutral-100">
                     <td className="py-2 pr-3">
                       <Link

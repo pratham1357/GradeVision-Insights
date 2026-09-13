@@ -276,7 +276,10 @@ function SessionDetail({
       ) : (
         <div className="space-y-4 text-sm">
           <p className="text-neutral-500">
-            {result.sessionStatus} · score {result.totalScore}/{result.maxScore}
+            {result.sessionStatus === "IN_PROGRESS"
+              ? "in exam"
+              : result.sessionStatus.toLowerCase()}{" "}
+            · score {result.totalScore}/{result.maxScore}
             {result.scorePercent !== null ? ` (${result.scorePercent}%)` : ""} ·{" "}
             {result.violationCount} integrity flag{result.violationCount === 1 ? "" : "s"} ·
             evidence notice{" "}

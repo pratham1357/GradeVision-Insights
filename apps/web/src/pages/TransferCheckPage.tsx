@@ -172,9 +172,10 @@ function Runner({
         ) : null}
       </div>
 
-      <Alert kind="info" title="Hints are unavailable during this Transfer Check">
+      <Alert kind="info" title="Hints are unavailable - independent demonstration">
         Solve this related problem on your own, in a single attempt. The result is recorded
-        separately from your assessment score - it does not change any marks.
+        separately and is <span className="font-medium">not part of the assessment score</span>; it
+        does not change any marks.
       </Alert>
 
       {locked && !attempted ? (
@@ -239,7 +240,7 @@ function Runner({
             <span className="font-medium">{transferResultLabel(view.transfer.result)}</span>
             {view.transfer.result === "NOT_EVALUATED"
               ? " - the grader could not run your code; this does not count as your attempt, so you may submit again."
-              : " - recorded separately from your assessment score."}
+              : " - recorded separately; not part of the assessment score."}
           </p>
         </Card>
       ) : null}

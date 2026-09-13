@@ -1123,8 +1123,8 @@ function TransferCheckCard({
           <>
             <p className="text-neutral-700">
               <span className="font-medium">{transfer.title}</span> —{" "}
-              {transferResultLabel(transfer.result)}. Recorded separately from this question's
-              score.
+              {transferResultLabel(transfer.result)}. Recorded separately; not part of the
+              assessment score.
             </p>
             <Link to={href} className="text-xs text-blue-700 hover:underline">
               View your transfer attempt →
@@ -1136,7 +1136,7 @@ function TransferCheckCard({
             <p className="text-neutral-700">
               You've completed this problem with guidance available. Try a related problem —{" "}
               <span className="font-medium">{transfer.title}</span> — without hints, in one attempt.
-              The result is recorded separately from your assessment score.
+              The result is recorded separately and is not part of the assessment score.
             </p>
             {!locked ? (
               <Link

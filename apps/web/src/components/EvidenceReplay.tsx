@@ -170,6 +170,7 @@ function AttemptRow({
                 value={attempt.sourceCode}
                 onChange={noop}
                 readOnly
+                height={viewerHeight(attempt.sourceCode)}
               />
             )}
           </div>
@@ -181,6 +182,18 @@ function AttemptRow({
 
 function noop(): void {
   /* read-only viewer */
+}
+
+/** Read-only code sized to its content, so a 4-line attempt is not a 440px black box. */
+function viewerHeight(code: string): string {
+  const lines = code.replace(/\r\n/g, "\n").split("\n").length;
+  return `${Math.min(440, Math.max(96, lines * 20 + 28))}px`;
+}
+
+/** Program output for display: without trailing line breaks, and explicit when empty. */
+function shown(text: string | null): string {
+  const t = (text ?? "").replace(/[\r\n]+$/u, "");
+  return t.length === 0 ? "(nothing)" : t;
 }
 
 function TestEvidence({
@@ -225,8 +238,8 @@ function TestEvidence({
             {!t.hidden && !t.passed && t.actualOutput !== null ? (
               <span className="text-neutral-400">
                 {" "}
-                · expected <code>{JSON.stringify(t.expectedOutput ?? "")}</code>, printed{" "}
-                <code>{JSON.stringify(t.actualOutput)}</code>
+                · expected <code>{shown(t.expectedOutput)}</code>, printed{" "}
+                <code>{shown(t.actualOutput)}</code>
               </span>
             ) : null}
           </li>
@@ -333,6 +346,7 @@ function TransferRow({ transfer }: { transfer: NonNullable<ReplayQuestion["trans
               value={attempt.sourceCode}
               onChange={noop}
               readOnly
+              height={viewerHeight(attempt.sourceCode)}
             />
           </div>
         </div>

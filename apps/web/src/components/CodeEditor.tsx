@@ -12,16 +12,19 @@ export function CodeEditor({
   value,
   onChange,
   readOnly = false,
+  height = "440px",
 }: {
   language: ProgrammingLanguage;
   value: string;
   onChange: (value: string) => void;
   readOnly?: boolean;
+  /** Editor height; read-only viewers pass a content-sized value. */
+  height?: string;
 }) {
   return (
     <div className="overflow-hidden rounded-md border border-neutral-300">
       <Editor
-        height="440px"
+        height={height}
         theme="vs-dark"
         language={monacoLanguage(language)}
         value={value}

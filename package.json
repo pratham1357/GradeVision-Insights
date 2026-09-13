@@ -22,6 +22,7 @@
     "db:generate": "pnpm --filter @gradevision/database generate",
     "db:migrate": "pnpm --filter @gradevision/database migrate",
     "db:seed": "pnpm --filter @gradevision/database seed",
+    "db:demo-reset": "pnpm --filter @gradevision/database demo-reset",
     "db:studio": "pnpm --filter @gradevision/database studio"
   },
   "devDependencies": {
