@@ -19,6 +19,7 @@ import { findOwnedQuestionMeta } from "../questions/questions.repository.js";
 import { emitAssessmentChanged, emitAssessmentSessionsChanged } from "../../realtime/index.js";
 import { toEvaluationDetail } from "../results/mapper.js";
 import { countedTransferAttempt, transferResultOf } from "../student/transfer-check.js";
+import { buildQuestionCohortEvidence, buildSessionEvidenceSummary } from "./evidence-summary.js";
 import {
   attachQuestion,
   findTransferConflicts,
@@ -312,11 +313,30 @@ export async function getAssessmentResults(
     throw ApiError.notFound("Assessment not found");
   }
 
+  // Observed per-question counts over every student's normal (non-transfer)
+  // submissions - the same rows the grid below is scored from.
+  const rowsByQuestionByStudent = new Map<string, SubmissionRow[][]>();
+  for (const session of assessment.examSessions) {
+    const byQuestion = new Map<string, SubmissionRow[]>();
+    for (const submission of session.submissions) {
+      if (submission.transferSourceQuestionId) continue;
+      const list = byQuestion.get(submission.questionId) ?? [];
+      list.push(submission);
+      byQuestion.set(submission.questionId, list);
+    }
+    for (const [questionId, rows] of byQuestion) {
+      const perStudent = rowsByQuestionByStudent.get(questionId) ?? [];
+      perStudent.push(rows);
+      rowsByQuestionByStudent.set(questionId, perStudent);
+    }
+  }
+
   const questions = assessment.questions.map((link) => ({
     questionId: link.questionId,
     title: link.question.title,
     position: link.position,
     points: Number(link.points),
+    evidence: buildQuestionCohortEvidence(rowsByQuestionByStudent.get(link.questionId) ?? []),
   }));
 
   const sessionByStudent = new Map<string, SessionRow>();
@@ -588,6 +608,38 @@ export async function getAssessmentSessionResult(
     };
   });
 
+  const scorePercent = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : null;
+  const conceptsByQuestion = new Map(
+    session.assessment.questions.map((link) => [
+      link.questionId,
+      link.question.concepts.map((c) => c.concept.name),
+    ]),
+  );
+  // The report is a pure function of the replay shaped above, so every count
+  // and sentence reconciles with the attempts the instructor can expand.
+  const summary = buildSessionEvidenceSummary({
+    totalScore,
+    maxScore,
+    scorePercent,
+    questions: questions.map((q) => ({
+      questionId: q.questionId,
+      title: q.title,
+      position: q.position,
+      points: q.points,
+      concepts: conceptsByQuestion.get(q.questionId) ?? [],
+      scorePercent: q.evaluation?.scorePercent ?? null,
+      attempts: q.attempts,
+      hintsAfterFinalAttempt: q.hintsAfterFinalAttempt,
+      transferCheck: q.transferCheck
+        ? {
+            title: q.transferCheck.title,
+            attempted: q.transferCheck.attempted,
+            result: q.transferCheck.result,
+          }
+        : null,
+    })),
+  });
+
   return {
     sessionId: session.id,
     assessmentId,
@@ -599,8 +651,9 @@ export async function getAssessmentSessionResult(
     submittedAt: session.submittedAt?.toISOString() ?? null,
     totalScore,
     maxScore,
-    scorePercent: maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : null,
+    scorePercent,
     violationCount: session._count.violations,
+    summary,
     questions,
   };
 }

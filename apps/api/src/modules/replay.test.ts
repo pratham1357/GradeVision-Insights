@@ -530,3 +530,143 @@ describe("evidence replay", () => {
     }
   });
 });
+
+describe("instructor evidence report", () => {
+  it("summarises the replay with numbers that reconcile with the attempts it was built from", async () => {
+    const res = await request(app).get(url(sessionA)).set("Authorization", instructor);
+    const { summary, questions, totalScore, maxScore, scorePercent } = res.body.data;
+    const [q] = questions;
+
+    expect(summary.score).toEqual({ totalScore, maxScore, scorePercent });
+    expect(summary.score.totalScore).toBe(40); // unchanged by the report or the transfer
+    expect(summary.questions).toEqual({
+      total: 1,
+      attempted: 1,
+      passed: 1,
+      failed: 0,
+      pending: 0,
+      notAttempted: 0,
+    });
+    expect(summary.hints).toEqual({ stagesConsumed: 2, questionsWithHints: 1 });
+    expect(summary.transfer).toEqual({ available: 1, attempted: 1, passed: 0, failed: 1 });
+
+    const [qe] = summary.questionEvidence;
+    expect(qe).toMatchObject({
+      questionId: ID.source,
+      title: "Two Sum",
+      evaluatedAttempts: 2,
+      unsuccessfulAttempts: 1,
+      finalOutcome: "PASSED",
+      attemptsUntilFirstPass: 2,
+      unsuccessfulBeforeFirstPass: 1,
+      hintStagesConsumed: 2,
+      hintStagesBeforeFirstPass: 2,
+      transfer: { title: "Contains Duplicate", attempted: true, result: "FAILED" },
+    });
+    expect(qe.observations).toEqual([
+      "Passed after 2 evaluated attempts (1 unsuccessful before the first pass).",
+      "2 hint stages consumed (2 before the first passing attempt).",
+      "Transfer Check (Contains Duplicate) did not pass (attempted without hints) - not part of the score.",
+    ]);
+
+    // Reconciliation with the replay itself.
+    const evaluated = q.attempts.filter(
+      (a: { evaluation: { status: string } | null }) => a.evaluation?.status === "COMPLETED",
+    );
+    expect(qe.evaluatedAttempts).toBe(evaluated.length);
+    expect(qe.hintStagesConsumed).toBe(
+      q.attempts.reduce((n: number, a: { hintsBefore: unknown[] }) => n + a.hintsBefore.length, 0) +
+        q.hintsAfterFinalAttempt.length,
+    );
+    expect(qe.transfer.result).toBe(q.transferCheck.result);
+    expect(summary.observations).toEqual([
+      "1 of 1 question passed.",
+      "2 hint stages consumed across 1 question.",
+      "Transfer Check Two Sum → Contains Duplicate: did not pass - not part of the score.",
+    ]);
+    // No concepts are attached to these fixtures: grouping is simply empty.
+    expect(summary.concepts).toEqual([]);
+  });
+
+  it("represents a pending / grader-failed session factually", async () => {
+    const res = await request(app).get(url(sessionB)).set("Authorization", instructor);
+    const { summary } = res.body.data;
+    expect(summary.questions).toEqual({
+      total: 1,
+      attempted: 1,
+      passed: 0,
+      failed: 0,
+      pending: 1,
+      notAttempted: 0,
+    });
+    const [qe] = summary.questionEvidence;
+    expect(qe).toMatchObject({
+      evaluatedAttempts: 0,
+      pendingAttempts: 1,
+      notEvaluatedAttempts: 1,
+      finalOutcome: "PENDING",
+      hintStagesConsumed: 0,
+    });
+    expect(qe.observations).toEqual(["Latest attempt is still being evaluated."]);
+    expect(JSON.stringify(res.body)).not.toContain(GRADER_INTERNALS);
+  });
+
+  it("adds observed per-question cohort counts to the results grid without changing scores", async () => {
+    const res = await request(app)
+      .get(`/api/v1/assessments/${ID.assessment}/results`)
+      .set("Authorization", instructor);
+    expect(res.status).toBe(200);
+    const [q] = res.body.data.questions;
+    // Ada: fail then pass (2 evaluated attempts). Bob: grader-failed + queued (nothing evaluated).
+    expect(q.evidence).toEqual({
+      studentsAttempted: 2,
+      firstEvaluatedAttemptPassed: 0,
+      eventuallyPassed: 1,
+      meanEvaluatedAttemptsAmongPassed: 2,
+    });
+    const ada = res.body.data.students.find(
+      (s: { studentId: string }) => s.studentId === ID.studentA,
+    );
+    expect(ada.totalScore).toBe(40);
+    expect(
+      (
+        await request(app)
+          .get(`/api/v1/assessments/${ID.assessment}/results`)
+          .set("Authorization", otherInstructor)
+      ).status,
+    ).toBe(404);
+  });
+
+  it("keeps the report free of hidden-test data and of any ability/risk vocabulary", async () => {
+    const res = await request(app).get(url(sessionA)).set("Authorization", instructor);
+    const text = JSON.stringify(res.body.data.summary);
+    for (const secret of [HIDDEN_INPUT, HIDDEN_EXPECTED, HIDDEN_STDOUT, HIDDEN_NAME]) {
+      expect(text).not.toContain(secret);
+    }
+    const lower = text.toLowerCase();
+    for (const banned of [
+      "mastery",
+      "competen",
+      "risk",
+      "cheat",
+      "probab",
+      "struggl",
+      "weak",
+      "strong",
+      "depend",
+    ]) {
+      expect(lower).not.toContain(banned);
+    }
+    expect(Object.keys(res.body.data.summary).sort()).toEqual(
+      [
+        "concepts",
+        "hints",
+        "observations",
+        "questionEvidence",
+        "questions",
+        "score",
+        "transfer",
+      ].sort(),
+    );
+  });
+});

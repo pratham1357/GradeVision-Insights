@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 
 import { QuestionReplay } from "../components/EvidenceReplay";
+import { CohortEvidence, EvidenceSummary } from "../components/EvidenceSummary";
 import { Alert, Badge, Button, Card, PageHeader, Spinner } from "../components/ui";
 import { instructorApi } from "../lib/instructor-api";
 import { connectRealtime } from "../lib/realtime";
@@ -131,6 +132,7 @@ function Results({ assessmentId }: { assessmentId: string }) {
       />
 
       <StatsRow stats={data.stats} />
+      <CohortEvidence questions={data.questions} />
 
       <Card title="Students">
         {data.students.length === 0 ? (
@@ -278,6 +280,8 @@ function SessionDetail({
             {result.scorePercent !== null ? ` (${result.scorePercent}%)` : ""} ·{" "}
             {result.violationCount} integrity flag{result.violationCount === 1 ? "" : "s"}
           </p>
+
+          <EvidenceSummary summary={result.summary} />
 
           {result.questions.map((q) => (
             <QuestionReplay key={q.questionId} question={q} />

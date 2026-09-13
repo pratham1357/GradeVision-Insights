@@ -219,6 +219,11 @@ export function loadAssessmentSessionResult(
                   id: true,
                   title: true,
                   transferQuestion: { select: { id: true, title: true } },
+                  // Concept labels for the evidence report's grouping.
+                  concepts: {
+                    orderBy: { concept: { name: "asc" } },
+                    select: { concept: { select: { name: true } } },
+                  },
                 },
               },
             },

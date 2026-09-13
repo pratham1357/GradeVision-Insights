@@ -23,7 +23,10 @@ type ReplayQuestion = InstructorSessionResult["questions"][number];
 export function QuestionReplay({ question }: { question: ReplayQuestion }) {
   const { attempts, hintsAfterFinalAttempt, transferCheck } = question;
   return (
-    <div className="rounded-md border border-neutral-200 p-3">
+    <div
+      id={`replay-${question.questionId}`}
+      className="scroll-mt-4 rounded-md border border-neutral-200 p-3"
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="font-medium">
           Q{question.position + 1}. {question.title}

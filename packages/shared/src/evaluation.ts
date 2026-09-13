@@ -138,13 +138,96 @@ export interface InstructorAssessmentStats {
   studentsWithViolations: number;
 }
 
+/**
+ * Observed, per-question counts across the assessment's students. Statistics
+ * about the persisted attempts - not a difficulty rating, not a ranking.
+ */
+export interface QuestionCohortEvidence {
+  /** Students with at least one submission for the question. */
+  studentsAttempted: number;
+  /** Students whose first attempt that completed evaluation passed every test. */
+  firstEvaluatedAttemptPassed: number;
+  /** Students whose latest evaluated attempt passed every test. */
+  eventuallyPassed: number;
+  /** Mean number of evaluated attempts among students who eventually passed. */
+  meanEvaluatedAttemptsAmongPassed: number | null;
+}
+
 /** `GET /api/v1/assessments/:assessmentId/results`. */
 export interface InstructorAssessmentResults {
   assessmentId: string;
   assessmentTitle: string;
-  questions: { questionId: string; title: string; position: number; points: number }[];
+  questions: {
+    questionId: string;
+    title: string;
+    position: number;
+    points: number;
+    evidence: QuestionCohortEvidence;
+  }[];
   stats: InstructorAssessmentStats;
   students: InstructorResultRow[];
+}
+
+// ---------------------------------------------------------------------------
+// Instructor evidence report (per session) - derived from the Evidence Replay
+// ---------------------------------------------------------------------------
+
+export type QuestionOutcome = "PASSED" | "FAILED" | "PENDING" | "NOT_EVALUATED" | "NOT_ATTEMPTED";
+
+/**
+ * Deterministic facts about one question in one session, each reconcilable
+ * with the replay's `attempts` / hints / `transferCheck`. `observations` are
+ * plain sentences stating those facts - never an assessment of the student.
+ */
+export interface QuestionEvidence {
+  questionId: string;
+  title: string;
+  position: number;
+  points: number;
+  scorePercent: number | null;
+  concepts: string[];
+  evaluatedAttempts: number;
+  unsuccessfulAttempts: number;
+  pendingAttempts: number;
+  notEvaluatedAttempts: number;
+  finalOutcome: QuestionOutcome;
+  /** 1-based index, among evaluated attempts, of the first passing one. */
+  attemptsUntilFirstPass: number | null;
+  unsuccessfulBeforeFirstPass: number | null;
+  hintStagesConsumed: number;
+  hintStagesBeforeFirstPass: number | null;
+  transfer: { title: string; attempted: boolean; result: TransferCheckResult | null } | null;
+  observations: string[];
+}
+
+/** The same per-question facts, grouped under an instructor-authored concept label. */
+export interface ConceptEvidenceGroup {
+  name: string;
+  questions: {
+    questionId: string;
+    title: string;
+    finalOutcome: QuestionOutcome;
+    evaluatedAttempts: number;
+    hintStagesConsumed: number;
+  }[];
+  observation: string;
+}
+
+export interface SessionEvidenceSummary {
+  score: { totalScore: number; maxScore: number; scorePercent: number | null };
+  questions: {
+    total: number;
+    attempted: number;
+    passed: number;
+    failed: number;
+    pending: number;
+    notAttempted: number;
+  };
+  hints: { stagesConsumed: number; questionsWithHints: number };
+  transfer: { available: number; attempted: number; passed: number; failed: number };
+  questionEvidence: QuestionEvidence[];
+  concepts: ConceptEvidenceGroup[];
+  observations: string[];
 }
 
 /**
@@ -230,6 +313,8 @@ export interface InstructorSessionResult {
   maxScore: number;
   scorePercent: number | null;
   violationCount: number;
+  /** Evidence report derived from `questions` below (reconciles with the replay). */
+  summary: SessionEvidenceSummary;
   questions: {
     questionId: string;
     title: string;
