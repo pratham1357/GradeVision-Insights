@@ -107,4 +107,9 @@ docker compose -f infrastructure/docker/docker-compose.yml up -d
 
 All three are optional — the API and evaluator degrade cleanly without Redis
 (PostgreSQL polling) or Judge0 (runs marked `FAILED` with a clear reason).
-Kubernetes manifests will be added progressively.
+
+There is no cloud deployment yet: the final-review product runs on one
+machine. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) records the deployable
+units, per-environment variables, migration/seed/demo-reset procedure, the
+execution-sandbox boundary, and the smallest external topology that would
+be justified. Kubernetes manifests will be added progressively.
