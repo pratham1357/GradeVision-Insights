@@ -197,3 +197,55 @@ read from the persisted evaluation - a factual observation, never a mastery
 score. The evaluator is unchanged: a transfer submission is graded by the exact
 same path as any other. Hints are refused server-side for a transfer question
 (`409 HINTS_UNAVAILABLE_FOR_TRANSFER`).
+
+## 11. Evidence record: what is recorded, who can access it, retention
+
+GradeVision records **process evidence** so an instructor can see how a
+solution came about, not only whether it is correct. The contract below
+describes what the implementation does today; the same text drives the
+student-facing notice (`EVIDENCE_POLICY` in `@gradevision/shared`). It makes
+no legal or regulatory compliance claim.
+
+**What is recorded** (all produced by the student's own actions in one
+`ExamSession`): every `Submission` (code, language, timestamp) and its
+`EvaluationRun` / `TestCaseResult`s; the latest `SubmissionDraft`; each
+`HintUsage` (stage, time, delivered text, and the evidence counts the hint
+policy recorded when it granted the stage); Transfer Check submissions
+(`Submission.transferSourceQuestionId`); and `Violation` rows for focus /
+fullscreen changes as plain timestamped events.
+
+**What is never recorded:** keystrokes, typing rhythm, clipboard contents or
+paste sizes, screen/camera/audio, mouse movement, device or browser
+fingerprints, and any score, probability or profile about the student beyond
+the assessment marks.
+
+**Association and ownership.** `Student → ExamSession → Submission /
+EvaluationRun / HintUsage / Transfer submission`. Exactly one `ExamSession`
+exists per (assessment, student), enforced by the database's unique index; a
+concurrent double start converges on that row. Every evidence read is scoped
+through the session: student endpoints resolve the session by
+`(sessionId, studentId)` and a submission by `(submissionId, examSession.studentId)`;
+instructor endpoints resolve `(assessmentId, sessionId)` under the assessment's
+ownership and read submissions and hints only through that session, keyed by
+the assessment's own questions. Evidence of another session - including the
+same question solved in another assessment - cannot enter a replay, report or
+cohort count through any API parameter.
+
+**Who can see what.** Students see their own submissions, results and hints
+for their session. Instructors of the section see the same record attempt by
+attempt (Evidence Replay) and the deterministic report derived from it. Hidden
+test names, inputs and expected outputs are never shown to students; a
+program's output on hidden tests is never shown to anyone; grader error text
+and infrastructure paths never leave the API.
+
+**Acknowledgement.** Before a first start the client shows the notice; when
+the student confirms it, `ExamSession.evidenceNoticeAcknowledgedAt` is set once
+and never cleared. It is recorded, not required: the API starts a session
+without it (older clients, the smoke test), and the instructor breakdown shows
+whether an acknowledgement is on record.
+
+**Retention (policy, not mechanism).** The record is kept as part of the
+course's assessment records for as long as the course record is kept; removal
+is a manual administrative action on the course data. **The implementation
+does not automatically delete or expire evidence**, does not anonymise it, and
+has no scheduled retention job - the product must not claim otherwise.

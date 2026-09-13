@@ -435,18 +435,22 @@ model RubricCriterion {
 // ---------------------------------------------------------------------------
 
 model ExamSession {
-  id            String            @id @default(uuid(7)) @db.Uuid
-  assessmentId  String            @db.Uuid
-  assessment    Assessment        @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
-  studentId     String            @db.Uuid
-  student       User              @relation(fields: [studentId], references: [id], onDelete: Restrict)
-  attemptNumber Int               @default(1)
-  status        ExamSessionStatus @default(NOT_STARTED)
-  startedAt     DateTime?
-  submittedAt   DateTime?
-  expiresAt     DateTime?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  id                           String            @id @default(uuid(7)) @db.Uuid
+  assessmentId                 String            @db.Uuid
+  assessment                   Assessment        @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  studentId                    String            @db.Uuid
+  student                      User              @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  attemptNumber                Int               @default(1)
+  status                       ExamSessionStatus @default(NOT_STARTED)
+  startedAt                    DateTime?
+  submittedAt                  DateTime?
+  expiresAt                    DateTime?
+  // When the student acknowledged the evidence notice (what this session
+  // records, who can see it, retention). Recorded, never required: null means
+  // no acknowledgement was captured. See docs/DOMAIN_MODEL.md "Evidence record".
+  evidenceNoticeAcknowledgedAt DateTime?
+  createdAt                    DateTime          @default(now())
+  updatedAt                    DateTime          @updatedAt
 
   submissions Submission[]
   drafts      SubmissionDraft[]

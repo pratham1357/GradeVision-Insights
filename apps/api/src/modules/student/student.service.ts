@@ -50,6 +50,7 @@ import {
   loadSessionView,
   markHintUsageConsumed,
   questionSupportsLanguage,
+  recordEvidenceNoticeAcknowledgement,
   updateSessionStatus,
   upsertDraft,
   type ExamQuestionRow,
@@ -61,7 +62,12 @@ import {
   transferGate,
   transferResultOf,
 } from "./transfer-check.js";
-import type { RequestHintInput, SaveDraftInput, SubmitInput } from "./student.schema.js";
+import type {
+  RequestHintInput,
+  SaveDraftInput,
+  StartSessionInput,
+  SubmitInput,
+} from "./student.schema.js";
 
 type SessionMeta = NonNullable<Awaited<ReturnType<typeof findSessionMeta>>>;
 type SessionRunRow = SessionSubmissionRow["evaluationRuns"][number];
@@ -262,6 +268,8 @@ export async function getEligibleAssessments(
             status: session.status,
             startedAt: session.startedAt?.toISOString() ?? null,
             expiresAt: session.expiresAt?.toISOString() ?? null,
+            evidenceNoticeAcknowledgedAt:
+              session.evidenceNoticeAcknowledgedAt?.toISOString() ?? null,
           }
         : null,
     };
@@ -270,21 +278,32 @@ export async function getEligibleAssessments(
 
 // --- Sessions -----------------------------------------------------------
 
+/**
+ * Start or resume the student's single session for an assessment. Exactly one
+ * `ExamSession` per (assessment, student) exists - enforced by the database's
+ * unique index, so a concurrent double start converges on the same row.
+ * An evidence-notice acknowledgement is recorded when the client sends it;
+ * it is never required to start.
+ */
 export async function startSession(
   assessmentId: string,
   studentId: string,
+  input: StartSessionInput = {},
 ): Promise<ExamSessionView> {
   const now = new Date();
   const eligible = await findEligibleAssessment(assessmentId, studentId, now);
   if (!eligible) {
     throw ApiError.notFound("Assessment not available");
   }
+  const acknowledgedAt = input.acknowledgeEvidenceNotice ? now : null;
 
   const existing = await findExistingSession(assessmentId, studentId);
   if (existing) {
     if (existing.status === "IN_PROGRESS") {
       if (existing.expiresAt !== null && existing.expiresAt <= now) {
         await updateSessionStatus(existing.id, "EXPIRED");
+      } else if (acknowledgedAt) {
+        await recordEvidenceNoticeAcknowledgement(existing.id, acknowledgedAt);
       }
       return buildSessionView(existing.id, now);
     }
@@ -301,13 +320,21 @@ export async function startSession(
       : eligible.endsAt;
 
   try {
-    const created = await createSession({ assessmentId, studentId, expiresAt: expiresAt ?? null });
+    const created = await createSession({
+      assessmentId,
+      studentId,
+      expiresAt: expiresAt ?? null,
+      evidenceNoticeAcknowledgedAt: acknowledgedAt,
+    });
     return buildSessionView(created.id, now);
   } catch (error) {
     // Lost a race with a concurrent start - return the session that won.
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const winner = await findExistingSession(assessmentId, studentId);
-      if (winner) return buildSessionView(winner.id, now);
+      if (winner) {
+        if (acknowledgedAt) await recordEvidenceNoticeAcknowledgement(winner.id, acknowledgedAt);
+        return buildSessionView(winner.id, now);
+      }
     }
     throw error;
   }
@@ -379,6 +406,7 @@ async function buildSessionView(sessionId: string, now: Date): Promise<ExamSessi
     assessmentStatus: row.assessment.status,
     timing: computeTiming(row, now),
     integrity,
+    evidenceNoticeAcknowledgedAt: row.evidenceNoticeAcknowledgedAt?.toISOString() ?? null,
     questions,
   };
 }

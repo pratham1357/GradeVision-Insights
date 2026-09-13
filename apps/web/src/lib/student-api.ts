@@ -6,6 +6,7 @@ import type {
   RecordViolationBody,
   RecordViolationResult,
   SaveDraftResult,
+  StartSessionBody,
   StudentAssessmentSummary,
   SubmissionResultView,
   SubmitResult,
@@ -29,8 +30,11 @@ export interface CodePayload {
 export const studentApi = {
   listAssessments: () => apiRequest<StudentAssessmentSummary[]>("/student/assessments"),
 
-  startSession: (assessmentId: string) =>
-    apiRequest<ExamSessionView>(`/student/assessments/${assessmentId}/session`, { method: "POST" }),
+  startSession: (assessmentId: string, body: StartSessionBody = {}) =>
+    apiRequest<ExamSessionView>(`/student/assessments/${assessmentId}/session`, {
+      method: "POST",
+      ...json(body),
+    }),
 
   getSession: (sessionId: string) => apiRequest<ExamSessionView>(`/student/sessions/${sessionId}`),
 

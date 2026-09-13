@@ -653,6 +653,7 @@ export async function getAssessmentSessionResult(
     maxScore,
     scorePercent,
     violationCount: session._count.violations,
+    evidenceNoticeAcknowledgedAt: session.evidenceNoticeAcknowledgedAt?.toISOString() ?? null,
     summary,
     questions,
   };

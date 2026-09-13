@@ -19,6 +19,13 @@ export const submissionParamsSchema = z.object({
   submissionId: z.uuid(),
 });
 
+/** Body of `POST /assessments/:assessmentId/session`; every field optional, an absent body is fine. */
+export const startSessionSchema = z.object({
+  acknowledgeEvidenceNotice: z.boolean().optional(),
+});
+
+export type StartSessionInput = z.infer<typeof startSessionSchema>;
+
 export const requestHintSchema = z.object({
   stageNumber: z.number().int().positive().max(20),
 });

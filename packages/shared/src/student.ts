@@ -41,7 +41,15 @@ export interface StudentAssessmentSummary {
     status: ExamSessionStatus;
     startedAt: string | null;
     expiresAt: string | null;
+    /** When the student acknowledged the evidence notice; `null` if not recorded. */
+    evidenceNoticeAcknowledgedAt: string | null;
   } | null;
+}
+
+/** `POST /api/v1/student/assessments/:assessmentId/session` body (all optional). */
+export interface StartSessionBody {
+  /** Records that the student read the evidence notice. Never required to start. */
+  acknowledgeEvidenceNotice?: boolean;
 }
 
 /** Server-authoritative timing, echoed on every session read and mutation. */
@@ -146,6 +154,8 @@ export interface ExamSessionView {
   timing: SessionTiming;
   /** Client-reported focus/fullscreen integrity signals for this session. */
   integrity: SessionIntegritySummary;
+  /** When the student acknowledged the evidence notice; `null` if not recorded. */
+  evidenceNoticeAcknowledgedAt: string | null;
   questions: ExamQuestion[];
 }
 

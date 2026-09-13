@@ -313,6 +313,8 @@ export interface InstructorSessionResult {
   maxScore: number;
   scorePercent: number | null;
   violationCount: number;
+  /** When the student acknowledged the evidence notice; `null` if not recorded. */
+  evidenceNoticeAcknowledgedAt: string | null;
   /** Evidence report derived from `questions` below (reconciles with the replay). */
   summary: SessionEvidenceSummary;
   questions: {

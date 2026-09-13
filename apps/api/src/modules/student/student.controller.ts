@@ -1,8 +1,14 @@
 import type { Request, Response } from "express";
 
 import { getAuthContext } from "../../middleware/index.js";
+import { ApiError } from "../../utils/api-error.js";
 import { pathParam, sendData } from "../../utils/http.js";
-import type { RequestHintInput, SaveDraftInput, SubmitInput } from "./student.schema.js";
+import {
+  startSessionSchema,
+  type RequestHintInput,
+  type SaveDraftInput,
+  type SubmitInput,
+} from "./student.schema.js";
 import {
   finishSession,
   getEligibleAssessments,
@@ -24,10 +30,18 @@ export async function listAvailableAssessments(req: Request, res: Response): Pro
   sendData(res, await getEligibleAssessments(userId));
 }
 
-/** `POST /api/v1/student/assessments/:assessmentId/session` - start or resume. */
+/**
+ * `POST /api/v1/student/assessments/:assessmentId/session` - start or resume.
+ * The body is optional (older clients and the smoke test send none); when it
+ * carries `acknowledgeEvidenceNotice: true` the acknowledgement is recorded.
+ */
 export async function startExamSession(req: Request, res: Response): Promise<void> {
   const { userId } = getAuthContext(req);
-  const view = await startSession(pathParam(req, "assessmentId"), userId);
+  const body = startSessionSchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    throw ApiError.badRequest("Invalid request body");
+  }
+  const view = await startSession(pathParam(req, "assessmentId"), userId, body.data);
   sendData(res, view, 201);
 }
 

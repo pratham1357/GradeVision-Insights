@@ -91,7 +91,13 @@ export function listEligibleAssessments(studentId: string, now: Date) {
       _count: { select: { questions: true } },
       examSessions: {
         where: { studentId },
-        select: { id: true, status: true, startedAt: true, expiresAt: true },
+        select: {
+          id: true,
+          status: true,
+          startedAt: true,
+          expiresAt: true,
+          evidenceNoticeAcknowledgedAt: true,
+        },
       },
     },
   });
@@ -132,6 +138,7 @@ export function createSession(data: {
   assessmentId: string;
   studentId: string;
   expiresAt: Date | null;
+  evidenceNoticeAcknowledgedAt: Date | null;
 }) {
   return prisma.examSession.create({
     data: {
@@ -141,8 +148,17 @@ export function createSession(data: {
       status: "IN_PROGRESS",
       startedAt: new Date(),
       expiresAt: data.expiresAt,
+      evidenceNoticeAcknowledgedAt: data.evidenceNoticeAcknowledgedAt,
     },
     include: { assessment: { select: { id: true, title: true, description: true } } },
+  });
+}
+
+/** Records the evidence-notice acknowledgement once; never clears or overwrites it. */
+export function recordEvidenceNoticeAcknowledgement(sessionId: string, at: Date) {
+  return prisma.examSession.updateMany({
+    where: { id: sessionId, evidenceNoticeAcknowledgedAt: null },
+    data: { evidenceNoticeAcknowledgedAt: at },
   });
 }
 

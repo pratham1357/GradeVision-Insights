@@ -278,7 +278,11 @@ function SessionDetail({
           <p className="text-neutral-500">
             {result.sessionStatus} · score {result.totalScore}/{result.maxScore}
             {result.scorePercent !== null ? ` (${result.scorePercent}%)` : ""} ·{" "}
-            {result.violationCount} integrity flag{result.violationCount === 1 ? "" : "s"}
+            {result.violationCount} integrity flag{result.violationCount === 1 ? "" : "s"} ·
+            evidence notice{" "}
+            {result.evidenceNoticeAcknowledgedAt
+              ? `acknowledged ${new Date(result.evidenceNoticeAcknowledgedAt).toLocaleString()}`
+              : "acknowledgement not recorded"}
           </p>
 
           <EvidenceSummary summary={result.summary} />
