@@ -1,8 +1,9 @@
 import { API_V1_PREFIX, type ApiErrorBody } from "@gradevision/shared";
 
+import { API_ORIGIN, NO_BACKEND_MESSAGE } from "./api-origin";
 import { sessionStore } from "./session-store";
 
-const BASE_URL = `${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000"}${API_V1_PREFIX}`;
+const BASE_URL = API_ORIGIN ? `${API_ORIGIN}${API_V1_PREFIX}` : null;
 
 export class ApiClientError extends Error {
   readonly status: number;
@@ -48,6 +49,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD"]);
  * never a raw `TypeError`. Server error bodies are shown as-is.
  */
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (!BASE_URL) throw new ApiClientError(0, "NO_BACKEND", NO_BACKEND_MESSAGE);
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");

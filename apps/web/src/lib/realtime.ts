@@ -1,7 +1,7 @@
 import { REALTIME_PATH, type RealtimeSubscribeMessage } from "@gradevision/shared";
 import { io, type Socket } from "socket.io-client";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+import { API_ORIGIN } from "./api-origin";
 
 export interface RealtimeHandlers {
   onSessionChanged?: () => void;
@@ -31,7 +31,10 @@ export function connectRealtime(
   handlers: RealtimeHandlers,
   factory: SocketFactory = (url, opts) => io(url, opts),
 ): () => void {
-  const socket = factory(BASE_URL, {
+  // No backend configured (preview build): pages stay on polling, which reports the same.
+  if (!API_ORIGIN) return () => {};
+
+  const socket = factory(API_ORIGIN, {
     path: REALTIME_PATH,
     withCredentials: true,
     transports: ["websocket", "polling"],

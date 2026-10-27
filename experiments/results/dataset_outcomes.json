@@ -1,0 +1,164 @@
+[
+  {
+    "case": "sum_even-b1",
+    "defect": "Sums odd numbers instead of even",
+    "pass": 1,
+    "visibleFail": 2,
+    "hiddenFail": 2,
+    "errors": 0,
+    "statuses": "FFFPF"
+  },
+  {
+    "case": "sum_even-b2",
+    "defect": "Loop stops one element early",
+    "pass": 2,
+    "visibleFail": 1,
+    "hiddenFail": 2,
+    "errors": 0,
+    "statuses": "FPFPF"
+  },
+  {
+    "case": "sum_even-b3",
+    "defect": "Arithmetic on a string (runtime error)",
+    "pass": 0,
+    "visibleFail": 2,
+    "hiddenFail": 3,
+    "errors": 5,
+    "statuses": "EEEEE"
+  },
+  {
+    "case": "palindrome-b1",
+    "defect": "Case-sensitive comparison",
+    "pass": 3,
+    "visibleFail": 1,
+    "hiddenFail": 1,
+    "errors": 0,
+    "statuses": "FPFPP"
+  },
+  {
+    "case": "palindrome-b2",
+    "defect": "Compares only first and last character",
+    "pass": 5,
+    "visibleFail": 0,
+    "hiddenFail": 0,
+    "errors": 0,
+    "statuses": "PPPPP"
+  },
+  {
+    "case": "palindrome-b3",
+    "defect": "Prints lower-case yes/no (format)",
+    "pass": 0,
+    "visibleFail": 2,
+    "hiddenFail": 3,
+    "errors": 0,
+    "statuses": "FFFFF"
+  },
+  {
+    "case": "second_largest-b1",
+    "defect": "Ignores duplicate values",
+    "pass": 2,
+    "visibleFail": 1,
+    "hiddenFail": 2,
+    "errors": 1,
+    "statuses": "PFFPE"
+  },
+  {
+    "case": "second_largest-b2",
+    "defect": "Fails when all values are equal (runtime error)",
+    "pass": 3,
+    "visibleFail": 1,
+    "hiddenFail": 1,
+    "errors": 2,
+    "statuses": "PEPPE"
+  },
+  {
+    "case": "second_largest-b3",
+    "defect": "Returns second smallest distinct value",
+    "pass": 3,
+    "visibleFail": 1,
+    "hiddenFail": 1,
+    "errors": 0,
+    "statuses": "FPPFP"
+  },
+  {
+    "case": "count_35-b1",
+    "defect": "Range excludes n",
+    "pass": 2,
+    "visibleFail": 1,
+    "hiddenFail": 2,
+    "errors": 0,
+    "statuses": "FPFPF"
+  },
+  {
+    "case": "count_35-b2",
+    "defect": "Uses AND instead of OR",
+    "pass": 2,
+    "visibleFail": 1,
+    "hiddenFail": 2,
+    "errors": 0,
+    "statuses": "FPFPF"
+  },
+  {
+    "case": "count_35-b3",
+    "defect": "Counts multiples of 15 twice",
+    "pass": 3,
+    "visibleFail": 0,
+    "hiddenFail": 2,
+    "errors": 0,
+    "statuses": "PPFPF"
+  },
+  {
+    "case": "vowels-b1",
+    "defect": "Case-sensitive",
+    "pass": 4,
+    "visibleFail": 0,
+    "hiddenFail": 1,
+    "errors": 0,
+    "statuses": "PPFPP"
+  },
+  {
+    "case": "vowels-b2",
+    "defect": "Counts distinct vowels, not occurrences",
+    "pass": 4,
+    "visibleFail": 0,
+    "hiddenFail": 1,
+    "errors": 0,
+    "statuses": "PPPPF"
+  },
+  {
+    "case": "vowels-b3",
+    "defect": "Omits the letter u",
+    "pass": 3,
+    "visibleFail": 0,
+    "hiddenFail": 2,
+    "errors": 0,
+    "statuses": "PPFPF"
+  },
+  {
+    "case": "reverse_words-b1",
+    "defect": "Reverses characters, not words",
+    "pass": 3,
+    "visibleFail": 1,
+    "hiddenFail": 1,
+    "errors": 0,
+    "statuses": "PFFPP"
+  },
+  {
+    "case": "reverse_words-b2",
+    "defect": "Omits trailing newline (equivalent under output normalisation)",
+    "pass": 5,
+    "visibleFail": 0,
+    "hiddenFail": 0,
+    "errors": 0,
+    "statuses": "PPPPP"
+  },
+  {
+    "case": "reverse_words-b3",
+    "defect": "Index error at the first element (runtime error)",
+    "pass": 0,
+    "visibleFail": 2,
+    "hiddenFail": 3,
+    "errors": 5,
+    "statuses": "EEEEE"
+  }
+]

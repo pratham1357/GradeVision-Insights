@@ -61,3 +61,6 @@ Desktop.ini
 
 # Local demo-reset backups (pg_dump of the demo database)
 database/backups/
+docs/final-review
+docs/FINAL_REVIEW_*.md
+docs/VERCEL_*.md

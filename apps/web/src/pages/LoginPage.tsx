@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
+import { API_ORIGIN, NO_BACKEND_MESSAGE } from "../lib/api-origin";
 import { useAuth } from "../lib/auth-context";
 import { afterLoginPath } from "../lib/auth-redirect";
 import { messageFromError } from "../lib/use-api";
@@ -114,6 +115,11 @@ export function LoginPage() {
             </div>
 
             <div aria-live="polite" className="space-y-2">
+              {!API_ORIGIN ? (
+                <Alert kind="warning" title="Preview only">
+                  {NO_BACKEND_MESSAGE}
+                </Alert>
+              ) : null}
               {sessionEnded && !error ? (
                 <Alert kind="info">
                   Your session ended. Sign in again to continue - autosaved drafts are kept.
@@ -141,12 +147,14 @@ export function LoginPage() {
               />
             </Field>
 
-            <Button type="submit" loading={submitting} className="w-full">
+            <Button type="submit" loading={submitting} disabled={!API_ORIGIN} className="w-full">
               {submitting ? "Signing in…" : "Sign in"}
             </Button>
           </form>
           <p className="text-center text-xs text-neutral-500">
-            Runs entirely on this machine. AI hints use a local model.
+            {API_ORIGIN
+              ? "Runs entirely on this machine. AI hints use a local model."
+              : "Hosted preview of the web interface only."}
           </p>
         </div>
       </main>
