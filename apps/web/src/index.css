@@ -1,1 +1,81 @@
 @import "tailwindcss";
+
+/*
+ * Design tokens. The palette keeps the existing blue so every current
+ * `blue-*` utility still matches; `brand-*` names the same hues for new code.
+ */
+@theme {
+  --font-sans:
+    "Inter", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono:
+    "JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace;
+
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-900: #1e3a8a;
+  --color-ink-950: #0b1220;
+
+  --animate-enter: enter 180ms ease-out both;
+  --animate-pulse-soft: pulse-soft 1.6s ease-in-out infinite;
+
+  @keyframes enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes pulse-soft {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-neutral-50 font-sans text-neutral-900;
+  }
+
+  /* One consistent, visible keyboard focus indicator; none for mouse clicks. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Respect the OS "reduce motion" setting everywhere, including Monaco. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

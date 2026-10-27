@@ -1,42 +1,56 @@
-import type { AuthUser, AuthenticatedAccount, LoginResult } from "@gradevision/shared";
+import type { AuthUser, LoginResult, SessionInfo } from "@gradevision/shared";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { apiRequest } from "./api-client";
-import { tokenStorage } from "./auth-storage";
+import { apiRequest, onUnauthorized } from "./api-client";
+import { purgeLegacyTokenStorage, sessionStore } from "./session-store";
 
 interface AuthContextValue {
   user: AuthUser | null;
   status: "loading" | "authenticated" | "anonymous";
+  /** Set when the server ended the session (expired/revoked/deactivated); cleared on login. */
+  sessionEnded: boolean;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 /**
- * Minimal auth state container. This is plumbing for later work - there is no
- * login screen or route guarding yet. On mount it hydrates the current user
- * only if a token is already stored.
+ * Auth state container over the server-side session. The session lives in an
+ * HttpOnly cookie the page cannot read; on load the app asks the API who is
+ * signed in (`GET /auth/session`), which also returns the CSRF token for
+ * state-changing requests. Any later 401 means the session ended server-side;
+ * route guards then send the user to sign in again and back to their page.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [status, setStatus] = useState<AuthContextValue["status"]>(
-    tokenStorage.get() ? "loading" : "anonymous",
+  const [status, setStatus] = useState<AuthContextValue["status"]>("loading");
+  const [sessionEnded, setSessionEnded] = useState(false);
+
+  useEffect(
+    () =>
+      onUnauthorized(() => {
+        setUser(null);
+        setStatus("anonymous");
+        setSessionEnded(true);
+      }),
+    [],
   );
 
   useEffect(() => {
-    if (!tokenStorage.get()) return;
+    purgeLegacyTokenStorage();
     let active = true;
-    apiRequest<AuthenticatedAccount>("/auth/me")
-      .then((account) => {
+    apiRequest<SessionInfo>("/auth/session")
+      .then((session) => {
         if (!active) return;
-        setUser(account);
+        sessionStore.setCsrfToken(session.csrfToken);
+        setUser(session.user);
         setStatus("authenticated");
       })
       .catch(() => {
         if (!active) return;
-        tokenStorage.clear();
+        sessionStore.clear();
         setUser(null);
         setStatus("anonymous");
       });
@@ -50,20 +64,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
-    tokenStorage.set(result.accessToken);
+    sessionStore.setCsrfToken(result.csrfToken);
     setUser(result.user);
     setStatus("authenticated");
+    setSessionEnded(false);
   }, []);
 
-  const logout = useCallback(() => {
-    tokenStorage.clear();
+  const logout = useCallback(async () => {
+    try {
+      await apiRequest<void>("/auth/logout", { method: "POST" });
+    } catch {
+      /* already signed out / offline: the local state is cleared regardless */
+    }
+    sessionStore.clear();
     setUser(null);
     setStatus("anonymous");
+    setSessionEnded(false);
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, status, login, logout }),
-    [user, status, login, logout],
+    () => ({ user, status, sessionEnded, login, logout }),
+    [user, status, sessionEnded, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

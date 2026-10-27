@@ -1,8 +1,6 @@
 import { REALTIME_PATH, type RealtimeSubscribeMessage } from "@gradevision/shared";
 import { io, type Socket } from "socket.io-client";
 
-import { tokenStorage } from "./auth-storage";
-
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 
 export interface RealtimeHandlers {
@@ -25,20 +23,17 @@ export type SocketFactory = (url: string, opts: Record<string, unknown>) => Sock
 /**
  * Opens a realtime connection and subscribes. The socket carries only
  * "something changed, re-fetch" signals; the REST endpoints stay authoritative.
- * Returns a disposer. If there is no token the connection is skipped entirely
- * and the caller keeps polling.
+ * Returns a disposer. The handshake carries the HttpOnly session cookie
+ * (`withCredentials`); if it is refused the caller simply keeps polling.
  */
 export function connectRealtime(
   subscription: RealtimeSubscribeMessage,
   handlers: RealtimeHandlers,
   factory: SocketFactory = (url, opts) => io(url, opts),
 ): () => void {
-  const token = tokenStorage.get();
-  if (!token) return () => {};
-
   const socket = factory(BASE_URL, {
     path: REALTIME_PATH,
-    auth: { token },
+    withCredentials: true,
     transports: ["websocket", "polling"],
     reconnection: true,
     reconnectionDelay: 1_000,

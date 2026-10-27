@@ -466,6 +466,7 @@ function ExamRunner({
               }
               actions={
                 <select
+                  aria-label="Programming language"
                   className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs"
                   value={editor.language}
                   disabled={locked}
@@ -507,7 +508,9 @@ function ExamRunner({
               </Alert>
             ) : null}
 
-            <ResultPanel key={`result-${currentId}`} question={current} />
+            <div aria-live="polite">
+              <ResultPanel key={`result-${currentId}`} question={current} />
+            </div>
 
             {current.transferCheck ? (
               <TransferCheckCard
@@ -998,7 +1001,10 @@ function HintsPanel({
       await load();
     } catch (err) {
       if (err instanceof ApiClientError && err.status === 503) {
-        setNotice("The AI mentor is not configured on this server. The written hints still work.");
+        setNotice(
+          "The AI mentor is unavailable right now (the local model may be stopped or still loading). " +
+            "Nothing was recorded, your grade is unaffected, and written hints still work - try again in a moment.",
+        );
       } else if (err instanceof ApiClientError && err.status === 409) {
         setNotice(messageFromError(err));
         void load();
@@ -1014,13 +1020,15 @@ function HintsPanel({
 
   return (
     <Card title="Hints">
-      {error ? <Alert kind="error">{error}</Alert> : null}
-      {notice ? (
-        <div className="mb-2">
-          <Alert kind="info">{notice}</Alert>
-        </div>
-      ) : null}
-      <ol className="space-y-2">
+      <div aria-live="polite">
+        {error ? <Alert kind="error">{error}</Alert> : null}
+        {notice ? (
+          <div className="mb-2">
+            <Alert kind="info">{notice}</Alert>
+          </div>
+        ) : null}
+      </div>
+      <ol className="space-y-2" aria-live="polite" aria-busy={busy !== null}>
         {stages.map((stage) => (
           <li key={stage.stageNumber} className="rounded-md border border-neutral-200 p-2">
             <div className="flex items-center justify-between gap-2">
@@ -1034,12 +1042,17 @@ function HintsPanel({
                 <Button
                   variant="secondary"
                   disabled={busy !== null}
+                  loading={busy === stage.stageNumber}
                   onClick={() => void requestStage(stage.stageNumber)}
                 >
-                  {busy === stage.stageNumber ? "Getting…" : "Get hint"}
+                  {busy === stage.stageNumber
+                    ? stage.deliveryType === "INTERACTIVE"
+                      ? "Thinking locally…"
+                      : "Getting…"
+                    : "Get hint"}
                 </Button>
               ) : (
-                <span className="text-xs tabular-nums text-neutral-400">
+                <span className="text-xs tabular-nums text-neutral-500">
                   {stage.unlockAt !== null
                     ? (() => {
                         const remaining = secondsUntil(stage.unlockAt, nowMs);

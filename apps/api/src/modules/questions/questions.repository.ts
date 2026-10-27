@@ -192,3 +192,53 @@ export function syncRubricCriteria(questionId: string, criteria: RubricCriterion
     });
   });
 }
+
+// --- Hint stages ------------------------------------------------------------
+
+const hintStageSelect = {
+  id: true,
+  stageNumber: true,
+  title: true,
+  deliveryType: true,
+  content: true,
+  _count: { select: { usages: true } },
+} satisfies Prisma.HintStageSelect;
+
+export function listHintStages(questionId: string) {
+  return prisma.hintStage.findMany({
+    where: { questionId, isActive: true },
+    orderBy: { stageNumber: "asc" },
+    select: hintStageSelect,
+  });
+}
+
+export function findHintStageForQuestion(stageId: string, questionId: string) {
+  return prisma.hintStage.findFirst({
+    where: { id: stageId, questionId, isActive: true },
+    select: hintStageSelect,
+  });
+}
+
+/** Appends a stage after the highest existing number (active or not), so numbers never collide. */
+export function appendHintStage(
+  questionId: string,
+  data: { title: string | null; deliveryType: "STATIC" | "INTERACTIVE"; content: string | null },
+) {
+  return prisma.$transaction(async (tx) => {
+    const last = await tx.hintStage.aggregate({
+      where: { questionId },
+      _max: { stageNumber: true },
+    });
+    return tx.hintStage.create({
+      data: { questionId, stageNumber: (last._max.stageNumber ?? 0) + 1, ...data },
+    });
+  });
+}
+
+export function updateHintStage(stageId: string, data: Prisma.HintStageUpdateInput) {
+  return prisma.hintStage.update({ where: { id: stageId }, data });
+}
+
+export function deleteHintStage(stageId: string) {
+  return prisma.hintStage.delete({ where: { id: stageId } });
+}

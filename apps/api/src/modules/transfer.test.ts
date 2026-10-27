@@ -10,7 +10,7 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../app.js";
-import { signAccessToken } from "./auth/jwt.js";
+import { issueSessionToken } from "./auth/sessions.js";
 
 const app = createApp();
 
@@ -65,7 +65,7 @@ async function cleanup(): Promise<void> {
 }
 
 async function bearer(userId: string, role: "INSTRUCTOR" | "STUDENT"): Promise<string> {
-  return `Bearer ${await signAccessToken({ sub: userId, role })}`;
+  return `Bearer ${await issueSessionToken(userId, role)}`;
 }
 
 let instructor = "";

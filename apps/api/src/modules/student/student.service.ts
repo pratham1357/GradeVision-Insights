@@ -21,6 +21,7 @@ import { enqueueEvaluation } from "../../services/evaluation-queue.js";
 import {
   HintProviderUnavailableError,
   requestInteractiveHint,
+  type InteractiveHint,
 } from "../../services/hint-engine.js";
 import { emitAssessmentChanged, emitSessionChanged } from "../../realtime/index.js";
 import { getSessionIntegrity } from "../integrity/integrity.service.js";
@@ -668,7 +669,11 @@ interface HintUsageRow {
   detail: Prisma.JsonValue | null;
 }
 
-/** The hint text already delivered for a usage row (static content or stored AI text). */
+/**
+ * The hint text already delivered for a usage row: the snapshot stored at
+ * delivery (static and AI alike), else - for rows written before static
+ * snapshots existed - the stage's current authored text.
+ */
 function usageHintText(
   stageContent: string | null,
   detail: Prisma.JsonValue | null,
@@ -809,16 +814,36 @@ export async function requestHint(
     if (!content) {
       throw new ApiError(409, "HINT_UNAVAILABLE", "This hint has no content configured");
     }
+    // Snapshot the exact text shown, so a later edit of the stage by the
+    // instructor never rewrites what the evidence record says was delivered.
+    const staticDetail = { hint: content, source: "static" } satisfies Prisma.InputJsonObject;
     if (existing) {
-      await markHintUsageConsumed(existing.id);
+      await markHintUsageConsumed(existing.id, staticDetail);
     } else {
-      await createHintUsage({
-        hintStageId: stage.id,
-        examSessionId: sessionId,
-        studentId,
-        questionId,
-        status: "CONSUMED",
-      });
+      try {
+        await createHintUsage({
+          hintStageId: stage.id,
+          examSessionId: sessionId,
+          studentId,
+          questionId,
+          status: "CONSUMED",
+          detail: staticDetail,
+        });
+      } catch (error) {
+        // Lost a race with a concurrent identical request: return the stored row's text.
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) {
+          throw error;
+        }
+        const stored = await findHintUsage(sessionId, stage.id);
+        const text = stored ? usageHintText(content, stored.detail) : content;
+        return {
+          stageNumber: stage.stageNumber,
+          deliveryType: "STATIC",
+          status: "CONSUMED",
+          content: text ?? content,
+          source: "static",
+        };
+      }
     }
     return {
       stageNumber: stage.stageNumber,
@@ -841,9 +866,9 @@ export async function requestHint(
     .filter((t): t is string => Boolean(t));
   const evidence = buildHintExecutionEvidence(evidenceRows);
 
-  let hint: string;
+  let generated: InteractiveHint;
   try {
-    hint = await requestInteractiveHint({
+    generated = await requestInteractiveHint({
       stageNumber: stage.stageNumber,
       language: latest?.language ?? "PYTHON",
       questionTitle: question?.title ?? "this problem",
@@ -861,9 +886,16 @@ export async function requestHint(
 
   // Record what the delivered guidance was grounded in (counts only) so the
   // usage row can later be read as "given after N unsuccessful attempts".
+  // Provenance (which provider/model produced the text, which output validator
+  // passed it) is recorded for the instructor's evidence record only.
+  const hint = generated.hint;
   const latestAttempt = evidence.attempts.at(-1) ?? null;
   const detail = {
     hint,
+    source: "ai",
+    provider: generated.provider,
+    model: generated.model,
+    validator: generated.validator,
     evidence: {
       evaluatedAttempts: evidence.evaluatedAttempts,
       unsuccessfulAttempts: evidence.unsuccessfulAttempts,
@@ -885,9 +917,21 @@ export async function requestHint(
         detail,
       });
     } catch (error) {
-      // Lost a race with a concurrent identical request.
+      // Lost a race with a concurrent identical request: show the text that was
+      // recorded (the winner's), so what the student sees matches the evidence.
       if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) {
         throw error;
+      }
+      const stored = await findHintUsage(sessionId, stage.id);
+      const recorded = stored ? usageHintText(null, stored.detail) : null;
+      if (recorded) {
+        return {
+          stageNumber: stage.stageNumber,
+          deliveryType: "INTERACTIVE",
+          status: "CONSUMED",
+          content: recorded,
+          source: "ai",
+        };
       }
     }
   }

@@ -421,6 +421,9 @@ export function createSubmissionInSession(data: {
         attemptNumber: (last._max.attemptNumber ?? 0) + 1,
         status: "QUEUED",
         transferSourceQuestionId: data.transferSourceQuestionId ?? null,
+        // Same clock as hint delivery timestamps (also set by the API), so
+        // Evidence Replay orders attempts and hints consistently.
+        createdAt: new Date(),
       },
       select: {
         id: true,

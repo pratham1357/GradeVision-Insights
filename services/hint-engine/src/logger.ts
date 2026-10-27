@@ -12,7 +12,7 @@ function emit(level: Level, message: string, meta?: Record<string, unknown>): vo
   write(
     env.NODE_ENV === "production"
       ? JSON.stringify(line)
-      : `${line.ts} ${level.toUpperCase()} ${message}`,
+      : `${line.ts} ${level.toUpperCase()} ${message}${meta && Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : ""}`,
   );
 }
 

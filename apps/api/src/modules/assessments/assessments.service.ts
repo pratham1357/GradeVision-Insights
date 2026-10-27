@@ -436,15 +436,19 @@ type HintUsageRow = SessionResultRow["hintUsages"][number];
 
 /**
  * A delivered hint as replay evidence. `content` is the text actually shown to
- * the student (persisted AI text, else the authored static text); `grantedAfter`
- * is what the hint policy recorded when it unlocked the stage - counts only.
+ * the student (the snapshot stored at delivery; the authored static text only
+ * for rows recorded before static snapshots); `grantedAfter` is what the hint
+ * policy recorded when it unlocked the stage - counts only.
  */
 function toReplayHint(usage: HintUsageRow): ReplayHint {
   const detail =
     usage.detail && typeof usage.detail === "object" && !Array.isArray(usage.detail)
       ? (usage.detail as Record<string, unknown>)
       : null;
-  const aiText = typeof detail?.hint === "string" && detail.hint.length > 0 ? detail.hint : null;
+  const snapshot = typeof detail?.hint === "string" && detail.hint.length > 0 ? detail.hint : null;
+  const isAi = usage.hintStage.deliveryType === "INTERACTIVE";
+  const provider = typeof detail?.provider === "string" ? detail.provider : null;
+  const model = typeof detail?.model === "string" ? detail.model : null;
   const evidence =
     detail?.evidence && typeof detail.evidence === "object" && !Array.isArray(detail.evidence)
       ? (detail.evidence as Record<string, unknown>)
@@ -454,9 +458,10 @@ function toReplayHint(usage: HintUsageRow): ReplayHint {
   return {
     stageNumber: usage.hintStage.stageNumber,
     title: usage.hintStage.title,
-    source: usage.hintStage.deliveryType === "INTERACTIVE" ? "ai" : "static",
+    source: isAi ? "ai" : "static",
     requestedAt: (usage.consumedAt ?? usage.requestedAt).toISOString(),
-    content: aiText ?? usage.hintStage.content,
+    content: snapshot ?? usage.hintStage.content,
+    generatedBy: isAi && provider ? { provider, model } : null,
     grantedAfter:
       typeof unsuccessful === "number"
         ? {

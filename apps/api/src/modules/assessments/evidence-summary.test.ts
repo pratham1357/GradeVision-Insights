@@ -67,6 +67,7 @@ const hint = (stageNumber: number): ReplayHint => ({
   source: "static",
   requestedAt: "2026-09-12T10:00:30.000Z",
   content: null,
+  generatedBy: null,
   grantedAfter: null,
 });
 

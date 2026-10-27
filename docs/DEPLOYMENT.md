@@ -8,6 +8,12 @@ run, the per-environment configuration, the exact execution-sandbox boundary,
 and the smallest external topology that would be justified if the product has
 to be reachable from outside the development machine.
 
+**Update 2026-10-26:** authentication now uses server-side sessions
+([AUTH.md](AUTH.md)); the AWS plan, Amplify configuration and deployment
+blockers are in [AWS_DEPLOYMENT.md](AWS_DEPLOYMENT.md); the execution boundary
+and public-hosting gate are in [EXECUTION_ISOLATION.md](EXECUTION_ISOLATION.md).
+Those documents supersede the corresponding parts below.
+
 ## 1. Decision
 
 External deployment was **not** created in this step, on purpose:
@@ -36,7 +42,7 @@ verified local layout.
 browser ──HTTP/WS──▶ apps/api (Express + Socket.IO at /realtime, :4000)
    ▲                     │ Prisma                │ HTTP (internal token)
    │ static bundle       ▼                       ▼
-apps/web (Vite → dist/)  PostgreSQL        services/hint-engine (:4200) ──▶ Gemini (optional)
+apps/web (Vite → dist/)  PostgreSQL        services/hint-engine (:4200) ──▶ Ollama (local, :11434) | Gemini (explicit opt-in)
                          ▲
                          │ polls QUEUED submissions (or BullMQ when REDIS_URL is set)
                   services/evaluator (:4100) ──▶ ExecutionProvider ──▶ Judge0 | local | (Gemini stopgap) | none
@@ -61,15 +67,19 @@ What each unit needs of the others:
 - The web bundle needs exactly one value at **build** time: `VITE_API_BASE_URL`.
   It reaches the API over REST and opens Socket.IO on the same origin at
   `/realtime`; when the socket cannot connect the pages fall back to polling
-  automatically. The editor (`@monaco-editor/react`) loads Monaco from the
-  jsDelivr CDN, so the browser needs internet access.
+  automatically. Monaco is bundled with the app (`apps/web/src/lib/monaco-setup.ts`),
+  so the editor works with no internet access (verified by
+  `apps/web/scripts/browser-smoke.mjs`, which fails on any non-local request).
 - The API needs PostgreSQL and a JWT secret. Static hint stages are served by
   the API itself; only the AI-mentor stage is forwarded to the hint-engine.
 - The evaluator needs PostgreSQL and an execution provider (section 6). It
   shares no network with the API; both talk to the database.
-- The hint-engine needs a Gemini key to do anything; without one it answers
-  `/health` and returns 503 for hint requests, which the API turns into a clear
-  `HINT_PROVIDER_UNAVAILABLE` response.
+- The hint-engine needs `INTERNAL_SERVICE_TOKEN` (it refuses to start without
+  one) and the provider named by `LLM_PROVIDER` - by default a local Ollama on
+  `127.0.0.1:11434`. When that provider is down it answers `/health` (showing
+  `reachable` / `modelAvailable`) and returns an error for hint requests, which
+  the API turns into a clear `HINT_PROVIDER_UNAVAILABLE` response. It never
+  switches to another provider.
 
 ## 3. Prerequisites
 
@@ -92,12 +102,12 @@ only; nothing prefixed `VITE_` may ever carry one** (a test in
 | -------------------------------------------------------- | ----------------------- | ------------------------------- | ------------------------------- | --------------------------------------------------------- |
 | `NODE_ENV`                                               | all                     | `development`                   | `development`                   | `production` (info-level JSON logs)                       |
 | `DATABASE_URL` ◆                                         | api, eval               | local Postgres                  | local Postgres                  | managed/VM Postgres, TLS if remote                        |
-| `JWT_SECRET` ◆                                           | api                     | any ≥ 32 chars                  | any ≥ 32 chars                  | `openssl rand -base64 48`, rotated                        |
-| `JWT_EXPIRES_IN`                                         | api                     | `15m`                           | `2h` (long enough for an exam)  | `15m`–`2h`                                                |
-| `API_HOST` / `API_PORT`                                  | api                     | `0.0.0.0` / `4000`              | same                            | same (behind TLS termination)                             |
+| `SESSION_SECRET` ◆ (legacy name `JWT_SECRET`)            | api                     | any ≥ 32 chars                  | any ≥ 32 chars                  | random 32 bytes, rotated (ends all sessions' CSRF tokens) |
+| `SESSION_IDLE_MINUTES` / `SESSION_ABSOLUTE_HOURS`        | api                     | `60` / `12`                     | same                            | same; see docs/AUTH.md                                    |
+| `API_HOST` / `API_PORT`                                  | api                     | `127.0.0.1` / `4000`            | same                            | `127.0.0.1` behind TLS termination                        |
 | `API_CORS_ORIGIN`                                        | api                     | `http://localhost:5173`         | same                            | the web origin(s), comma-separated, never `*`             |
 | `HINT_ENGINE_URL`                                        | api                     | `http://localhost:4200`         | same                            | private address of the hint-engine                        |
-| `INTERNAL_SERVICE_TOKEN` ◆                               | api, hints              | unset                           | unset                           | **set** (hint-engine then rejects other callers with 401) |
+| `INTERNAL_SERVICE_TOKEN` ◆                               | api, hints              | **required**, >= 32 chars       | **required**                    | **required** (hint-engine rejects other callers with 401) |
 | `REDIS_URL`                                              | api, eval               | unset (polling)                 | unset                           | unset unless queue throughput needs it                    |
 | `VITE_API_BASE_URL`                                      | web (build)             | `http://localhost:4000`         | same                            | public API origin (`https://…`)                           |
 | `EVALUATOR_PORT`                                         | eval                    | `4100`                          | `4100`                          | `4100`, firewalled                                        |
@@ -109,7 +119,10 @@ only; nothing prefixed `VITE_` may ever carry one** (a test in
 | `GEMINI_EXECUTION_FALLBACK_ENABLED`                      | eval                    | `false`                         | **`false`** (real execution)    | `false`                                                   |
 | `GEMINI_API_KEY` ◆                                       | hints (+ eval fallback) | optional                        | optional (AI-mentor stage only) | set for the hint-engine only                              |
 | `GEMINI_MODEL` / `GEMINI_BASE_URL` / `GEMINI_TIMEOUT_MS` | hints                   | defaults                        | defaults                        | defaults                                                  |
-| `LLM_PROVIDER`                                           | hints                   | `gemini`                        | `gemini`                        | `gemini`                                                  |
+| `LLM_PROVIDER`                                           | hints                   | `ollama`                        | `ollama`                        | `ollama` (or `none`); `gemini` only by explicit choice    |
+| `OLLAMA_BASE_URL` / `OLLAMA_MODEL` / `OLLAMA_TIMEOUT_MS` | hints                   | loopback / see AI_HINTS.md      | same                            | same; loopback only                                       |
+| `HINT_ENGINE_TIMEOUT_MS`                                 | api                     | `90000` (CPU model)             | `90000`                         | sized to the model host                                   |
+| `EVALUATOR_HOST` / `HINT_ENGINE_HOST`                    | eval, hints             | `127.0.0.1`                     | `127.0.0.1`                     | `127.0.0.1` (private address only if split across hosts)  |
 | `HINT_ENGINE_PORT`                                       | hints                   | `4200`                          | `4200`                          | `4200`, firewalled                                        |
 | `SHADOW_DATABASE_URL` ◆                                  | migrate dev             | unset                           | unset                           | only for `migrate dev` on managed Postgres                |
 
@@ -250,8 +263,9 @@ topology is **one small Linux VM plus a managed or co-located PostgreSQL**:
    the language toolchains only if it will be a trusted demo host. Run the
    three compiled services under systemd (one unit each, `EnvironmentFile=`
    with mode 600) or under Docker Compose once images exist. Bind the API to
-   `127.0.0.1` behind nginx; the evaluator and hint-engine bind to `0.0.0.0` by
-   default, so block their ports at the security group / firewall.
+   `127.0.0.1` behind nginx; the evaluator and hint-engine bind to `127.0.0.1`
+   by default - keep it that way, and still block their ports at the security
+   group / firewall.
 2. **PostgreSQL**: AWS RDS `db.t4g.micro` (PostgreSQL 16/17, not publicly
    accessible, same VPC as the VM) or a `postgres:17` container on the VM with
    a volume for a throwaway demo. Apply migrations with `prisma migrate deploy`
@@ -289,12 +303,29 @@ evaluation 0/4 → hint 1 → wrong → hint 2 → correct 4/4 → Transfer Chec
 Evidence summary and Evidence Replay. The same sequence is scripted for the
 local stack in `docs/DEVELOPMENT.md`.
 
-## 9. Gemini
+### Frontend-only hosting (e.g. AWS Amplify Hosting)
 
-Gemini is used in exactly one place that affects what a student sees: the
-**AI-mentor hint stage**, via `services/hint-engine` (`GEMINI_API_KEY` on that
-service only; the API forwards a sanitized, fenced context and returns plain
-text). It never decides grading truth, pass/fail, the assessment score, the
+The web app is a static bundle with one build-time variable,
+`VITE_API_BASE_URL`, so it can be hosted by Amplify Hosting (build command
+`pnpm --filter @gradevision/web build`, output `apps/web/dist`, SPA rewrite of
+all paths to `/index.html`). That hosts **only the frontend**. The API,
+evaluator, hint-engine, PostgreSQL and Ollama still need a host of their own
+(section 8), the API's `API_CORS_ORIGIN` must list the Amplify origin, and the
+untrusted-code execution boundary (section 6) applies unchanged. None of this
+has been provisioned.
+
+## 9. AI providers (Ollama by default, Gemini by explicit choice)
+
+The local demo makes **no** call to any cloud service: hints use Ollama on this
+machine (`LLM_PROVIDER=ollama`, loopback URL enforced at startup), and the
+evaluator's Gemini execution fallback stays off. Gemini can still be selected
+explicitly for the AI-mentor hint stage (`LLM_PROVIDER=gemini` plus
+`GEMINI_API_KEY` on the hint-engine only); it is never used as a fallback.
+
+Whichever model is configured is used in exactly one place that affects what a
+student sees: the **AI-mentor hint stage**, via `services/hint-engine` (the API
+forwards a sanitized, fenced context and returns validated plain text, recorded
+with its provider and model). It never decides grading truth, pass/fail, the assessment score, the
 Transfer Check outcome, the Evidence Report, or any mastery/competence/risk
 figure; those are computed by `@gradevision/grading` and deterministic API code
 from persisted results. The evaluator's Gemini execution fallback is a
@@ -305,7 +336,10 @@ documented stopgap that must stay off wherever real execution is available.
 - No container images, no infrastructure-as-code, no hosted instance. Section
   8 is a recipe, not a tested deployment.
 - Untrusted-code isolation is deferred (section 6).
-- The editor depends on the jsDelivr CDN for Monaco.
+- The system PostgreSQL service on the development machine listens on all
+  interfaces (its own `listen_addresses` setting, outside this repository);
+  restrict it to `localhost` in `postgresql.conf` or block port 5432 in the
+  firewall if the machine is on a shared network.
 - Services do not migrate on boot; a release is "migrate, then restart".
 - Single API process: Socket.IO rooms are in-memory, so horizontal scaling
   would need a Socket.IO adapter (out of scope; polling fallback still works).

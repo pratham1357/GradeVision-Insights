@@ -1,0 +1,34 @@
+# AWS Amplify Hosting build for the WEB APP ONLY (apps/web, a static Vite SPA).
+#
+# This does NOT deploy the API, evaluator, hint-engine, PostgreSQL or any model
+# server - those need their own hosting (docs/AWS_DEPLOYMENT.md). Not yet
+# exercised on Amplify: nothing has been deployed.
+#
+# Amplify console settings this file relies on:
+#   - Monorepo app root: apps/web   (env AMPLIFY_MONOREPO_APP_ROOT=apps/web)
+#   - Environment variable VITE_API_BASE_URL=https://api.<your-domain>
+#     (public, compiled into the browser bundle - never put a secret in VITE_*)
+#   - Rewrites: SPA fallback to /index.html (docs/AWS_DEPLOYMENT.md section 3)
+#   - Custom headers: apps/web/customHttp.yml
+version: 1
+applications:
+  - appRoot: apps/web
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - corepack enable
+            - corepack prepare pnpm@9.15.9 --activate
+            # Install only the web app and its workspace dependencies (no Prisma, no server deps).
+            - cd ../.. && pnpm install --frozen-lockfile --filter "@gradevision/web..."
+        build:
+          commands:
+            - test -n "$VITE_API_BASE_URL" || (echo "VITE_API_BASE_URL is not set" && exit 1)
+            - cd ../.. && pnpm --filter @gradevision/shared build && pnpm --filter @gradevision/web build
+      artifacts:
+        baseDirectory: dist
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - ../../node_modules/.pnpm/**/*

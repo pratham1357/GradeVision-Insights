@@ -1,5 +1,5 @@
 /**
- * Headless end-to-end smoke test against the seeded dev database.
+ * Headless end-to-end smoke test against the seeded TEST database (gradevision_test).
  *
  *   pnpm build && node apps/api/scripts/smoke-e2e.mjs
  *
@@ -18,7 +18,12 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 process.env.NODE_ENV ??= "test";
 process.env.DATABASE_URL ??=
-  "postgresql://gradevision:gradevision_dev_pw@localhost:5432/gradevision?schema=public";
+  "postgresql://gradevision:gradevision_dev_pw@localhost:5432/gradevision_test?schema=public";
+// Creates and deletes rows: only ever against a dedicated test database.
+if (!/test/i.test(new URL(process.env.DATABASE_URL).pathname)) {
+  console.error("smoke-e2e: refusing to run against a database whose name does not contain 'test'");
+  process.exit(2);
+}
 process.env.JWT_SECRET ??= "smoke-jwt-secret-smoke-jwt-secret-smoke-1234";
 process.env.API_CORS_ORIGIN = "http://localhost:5173";
 
@@ -57,7 +62,7 @@ async function api(method, path, token, body) {
   return { status: res.status, body: json?.data ?? json };
 }
 const login = async (email, password) =>
-  (await api("POST", "/auth/login", null, { email, password })).body.accessToken;
+  (await api("POST", "/auth/login", null, { email, password, mode: "token" })).body.accessToken;
 
 const mockProvider = {
   name: "smoke-mock",

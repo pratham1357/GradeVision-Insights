@@ -1,24 +1,22 @@
+import { randomBytes } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
-import { signAccessToken } from "../modules/auth/jwt.js";
 import { assessmentRoom, authenticateSocket, sessionRoom } from "./io.js";
 
+// A valid session is covered end-to-end in io.integration.test.ts.
 describe("authenticateSocket", () => {
-  it("accepts a valid access token and returns the identity", async () => {
-    const token = await signAccessToken({ sub: "user-1", role: "STUDENT" });
-    const auth = await authenticateSocket(token);
-    expect(auth).toEqual({ userId: "user-1", role: "STUDENT" });
-  });
-
-  it("rejects a missing / non-string token", async () => {
+  it("rejects a missing / non-string token and an absent cookie", async () => {
     expect(await authenticateSocket(undefined)).toBeNull();
     expect(await authenticateSocket("")).toBeNull();
     expect(await authenticateSocket(123)).toBeNull();
+    expect(await authenticateSocket(undefined, "other=1; theme=dark")).toBeNull();
   });
 
-  it("rejects a tampered token", async () => {
-    const token = await signAccessToken({ sub: "user-1", role: "INSTRUCTOR" });
-    expect(await authenticateSocket(token + "x")).toBeNull();
+  it("rejects an unknown or malformed session token", async () => {
+    expect(await authenticateSocket(randomBytes(32).toString("base64url"))).toBeNull();
+    expect(await authenticateSocket("short")).toBeNull();
+    expect(await authenticateSocket("x".repeat(500))).toBeNull();
   });
 });
 

@@ -8,7 +8,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../app.js";
-import { signAccessToken } from "./auth/jwt.js";
+import { issueSessionToken } from "./auth/sessions.js";
 
 const app = createApp();
 
@@ -28,7 +28,7 @@ const ID = {
 } as const;
 
 async function bearer(userId: string, role: "INSTRUCTOR" | "STUDENT" | "ADMIN"): Promise<string> {
-  return `Bearer ${await signAccessToken({ sub: userId, role })}`;
+  return `Bearer ${await issueSessionToken(userId, role)}`;
 }
 
 async function cleanup(): Promise<void> {

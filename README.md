@@ -14,7 +14,7 @@ and scale independently toward institution-scale deployment.
 | Frontend       | React, Vite, TypeScript, Tailwind CSS                         |
 | Backend API    | Node.js, Express, TypeScript, REST                            |
 | Evaluation     | `evaluator` service + Judge0 sandbox + `@gradevision/grading` |
-| AI             | `hint-engine` service + Gemini (env-driven `LLMProvider`)     |
+| AI             | `hint-engine` + local Ollama model (env-driven `LLMProvider`) |
 | Database       | PostgreSQL + Prisma (`@gradevision/database`)                 |
 | Cache / queue  | Redis + BullMQ (`@gradevision/queue`) — optional              |
 | Infrastructure | Docker Compose (Kubernetes _added later_)                     |
@@ -45,7 +45,7 @@ apps/
   api/            Express + TypeScript REST API (layered; /api/v1/*) + Socket.IO at /realtime
 services/
   evaluator/      Async submission evaluation: BullMQ/poll → Judge0 → grading → persist
-  hint-engine/    Backend-only progressive-hint LLM provider (Gemini via fetch)
+  hint-engine/    Backend-only progressive-hint LLM provider (local Ollama; Gemini opt-in)
 packages/
   shared/         Shared TypeScript types, schemas, constants
   grading/        Pure deterministic scoring engine (functional + rubric + semantic)
@@ -108,8 +108,9 @@ docker compose -f infrastructure/docker/docker-compose.yml up -d
 All three are optional — the API and evaluator degrade cleanly without Redis
 (PostgreSQL polling) or Judge0 (runs marked `FAILED` with a clear reason).
 
-There is no cloud deployment yet: the final-review product runs on one
-machine. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) records the deployable
+There is no cloud deployment yet: the product runs entirely on one machine,
+offline once installed - see [docs/LOCAL_DEMO.md](docs/LOCAL_DEMO.md) for the
+startup commands, readiness check and demo runbook. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) records the deployable
 units, per-environment variables, migration/seed/demo-reset procedure, the
 execution-sandbox boundary, and the smallest external topology that would
 be justified. Kubernetes manifests will be added progressively.

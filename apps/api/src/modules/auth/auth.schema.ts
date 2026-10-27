@@ -10,6 +10,9 @@ export const loginSchema = z.object({
     z.email({ error: "A valid email is required" }).max(320),
   ),
   password: z.string().min(1, "Password is required").max(200),
+  // `cookie` (browsers): HttpOnly session cookie. `token`: the opaque session
+  // token in the body for non-browser clients - disabled unless AUTH_TOKEN_LOGIN.
+  mode: z.enum(["cookie", "token"]).default("cookie"),
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;

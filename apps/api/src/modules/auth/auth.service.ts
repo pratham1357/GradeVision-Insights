@@ -3,9 +3,10 @@ import type { User } from "@gradevision/database";
 
 import { ApiError } from "../../utils/api-error.js";
 import { findUserByEmail, findUserById } from "./auth.repository.js";
-import { signAccessToken } from "./jwt.js";
 import { verifyPassword } from "./password.js";
 import type { LoginInput } from "./auth.schema.js";
+import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from "./login-throttle.js";
+import { createSession } from "./sessions.js";
 
 /**
  * A real Argon2id hash (of a throwaway random string). When the email is unknown
@@ -24,17 +25,25 @@ function toAccount(user: User): AuthenticatedAccount {
 }
 
 export interface LoginOutput {
-  accessToken: string;
   user: AuthUser;
+  /** Opaque session token - goes into the HttpOnly cookie (or a token-mode response). */
+  token: string;
+  csrfToken: string;
+  expiresAt: Date;
 }
 
 /**
- * Verifies credentials and issues an access token.
+ * Verifies credentials and opens a new server-side session.
  *
  * A single generic error is returned whether the email is unknown, the password
  * is wrong, or the account is inactive - no account enumeration.
  */
-export async function login(input: LoginInput): Promise<LoginOutput> {
+export async function login(
+  input: LoginInput,
+  source = "unknown",
+  userAgent: string | null = null,
+): Promise<LoginOutput> {
+  assertLoginAllowed(input.email, source);
   const user = await findUserByEmail(input.email);
 
   const passwordMatches = await verifyPassword(
@@ -43,11 +52,20 @@ export async function login(input: LoginInput): Promise<LoginOutput> {
   );
 
   if (!user || !passwordMatches || !user.isActive) {
+    recordLoginFailure(input.email, source);
     throw new ApiError(401, "INVALID_CREDENTIALS", "Invalid email or password");
   }
+  clearLoginFailures(input.email, source);
 
-  const accessToken = await signAccessToken({ sub: user.id, role: user.role });
-  return { accessToken, user: toAuthUser(user) };
+  // A fresh session on every sign-in (the caller revokes any session the
+  // request already carried - no session fixation).
+  const session = await createSession(user.id, userAgent);
+  return {
+    user: toAuthUser(user),
+    token: session.token,
+    csrfToken: session.csrfToken,
+    expiresAt: session.expiresAt,
+  };
 }
 
 /**

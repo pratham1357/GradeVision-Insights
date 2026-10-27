@@ -266,7 +266,10 @@ function HintRow({ hint, context }: { hint: ReplayHint; context: string }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-amber-900">
           <span className="font-medium">Hint stage {hint.stageNumber}</span>
-          {hint.title ? ` (${hint.title})` : ""} · {hint.source === "ai" ? "AI mentor" : "authored"}{" "}
+          {hint.title ? ` (${hint.title})` : ""} · {hint.source === "ai" ? "AI mentor" : "authored"}
+          {hint.generatedBy
+            ? ` (${hint.generatedBy.provider}${hint.generatedBy.model ? ` · ${hint.generatedBy.model}` : ""})`
+            : ""}{" "}
           · requested {context}
           {hint.grantedAfter
             ? ` · granted after ${hint.grantedAfter.unsuccessfulAttempts} unsuccessful evaluated attempt${hint.grantedAfter.unsuccessfulAttempts === 1 ? "" : "s"}`
@@ -277,7 +280,12 @@ function HintRow({ hint, context }: { hint: ReplayHint; context: string }) {
           {hint.content ? (
             <>
               {" · "}
-              <button type="button" className="hover:underline" onClick={() => setOpen((o) => !o)}>
+              <button
+                type="button"
+                className="hover:underline"
+                aria-expanded={open}
+                onClick={() => setOpen((o) => !o)}
+              >
                 {open ? "hide text" : "show text"}
               </button>
             </>

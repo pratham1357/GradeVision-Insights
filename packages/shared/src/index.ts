@@ -15,3 +15,4 @@ export * from "./hints.js";
 export * from "./integrity.js";
 export * from "./realtime.js";
 export * from "./evidence-policy.js";
+export * from "./admin.js";

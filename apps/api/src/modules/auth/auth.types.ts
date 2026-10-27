@@ -4,7 +4,11 @@ import type { UserRole as SharedUserRole } from "@gradevision/shared";
 /** Verified identity for the current request. Sourced ONLY from a valid JWT. */
 export interface AuthContext {
   userId: string;
+  /** Read from the database on every request - never from a client-held claim. */
   role: PrismaUserRole;
+  sessionId: string;
+  /** How the session was presented: browser cookie (CSRF-checked) or bearer header. */
+  via: "cookie" | "bearer";
 }
 
 // Compile-time guarantee that the Prisma role enum and the shared role union

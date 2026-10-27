@@ -148,16 +148,44 @@ pnpm test        # vitest across apps/api, apps/web and the packages/services
 - `apps/web` (`api-client`, `realtime`, `use-integrity-monitor`, `config-isolation`),
   `auth` / `jwt` / `password` / `realtime/watcher` / `realtime/io` — pure-logic /
   mocked, no database, no DOM.
-- `instructor` / `student` / `results-hints` / `integrity` / `multi-student` /
-  `realtime/io.integration` / evaluator `evaluate` — real integration tests. They
-  need PostgreSQL running and the schema migrated (`DATABASE_URL`, the seeded dev
-  DB locally). Each creates its own fixtures under a fixed id prefix
+- `auth` (sessions, CSRF, expiry, revocation) / `admin` / `demo-reset` /
+  `instructor` / `student` / `results-hints` / `hint-stages` / `security` /
+  `integrity` / `multi-student` / `realtime/io.integration` / evaluator
+  `evaluate` — real integration tests. They need PostgreSQL running and the
+  schema migrated. **Point them at a dedicated test database, not the demo
+  database** (they create and delete their own fixture rows):
+
+  ```bash
+  # once: create + migrate + seed an isolated test database
+  psql -h localhost -U gradevision -d gradevision -c "CREATE DATABASE gradevision_test"
+  export DATABASE_URL="postgresql://gradevision:gradevision_dev_pw@localhost:5432/gradevision_test?schema=public"
+  pnpm --filter @gradevision/database exec prisma migrate deploy
+  pnpm --filter @gradevision/database exec tsx prisma/seed.ts
+  # every run (same shell)
+  pnpm test
+  ```
+
+  Without `DATABASE_URL` set, the API and evaluator suites use `gradevision_test`;
+  their Vitest configs refuse to start against any database whose name does not
+  contain `test`. Each creates its own fixtures under a fixed id prefix
   (`ffffffff-…`, `eeeeeeee-…`, `dddddddd-…`, `cccccccc-…`, `bbbbbbbb-…`,
   `aaaaaaaa-…`, `71000000-…`) and removes them before and after, so seed data is
   never touched. Judge0 is never required — the evaluator suite uses a mock
   `ExecutionProvider`.
+
+- `node apps/web/scripts/browser-smoke.mjs` — drives the **running** local stack
+  in headless Edge/Chrome over the DevTools protocol (no extra dependency):
+  instructor, student and admin sign-in, hint-stage editor, results, the exam
+  editor, keyboard skip link and the expired-session flow. Fails on console
+  errors, 5xx responses, or any request leaving this machine (e.g. a CDN). It
+  starts a session for `student1`; run `pnpm db:demo-reset` afterwards.
+- `security.test.ts` (API) — token forgery (`alg: none`, wrong secret, edited
+  role claim), the full role x route matrix, oversized/malformed payloads,
+  hidden-test redaction, and seeded fuzzing: random route params and bodies
+  must never produce a 5xx, and a random hint/attempt/finish state machine must
+  never violate the evidence policy. Seeds are fixed, so failures replay.
 - `pnpm --filter @gradevision/api smoke` — a headless end-to-end run against the
-  seeded DB (instructor activates an assessment → two students take it → submit →
+  seeded TEST database `gradevision_test` (refuses others) (instructor activates an assessment → two students take it → submit →
   grade → realtime nudges → integrity flag → static hint). Needs `pnpm build`
   first; leaves the DB as it found it.
 

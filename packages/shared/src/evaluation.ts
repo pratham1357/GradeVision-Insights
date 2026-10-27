@@ -261,6 +261,11 @@ export interface ReplayHint {
   requestedAt: string;
   /** The guidance text actually delivered, when persisted. */
   content: string | null;
+  /**
+   * For AI hints: which provider and exact model produced the text, as recorded
+   * at delivery. `null` for static hints and for rows recorded before provenance.
+   */
+  generatedBy: { provider: string; model: string | null } | null;
   grantedAfter: {
     unsuccessfulAttempts: number;
     latestOutcome: "PASSED" | "FAILED" | null;

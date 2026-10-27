@@ -29,6 +29,21 @@ function normalize(err: unknown): ApiError {
     return new ApiError(400, "INVALID_JSON", "Request body is not valid JSON");
   }
 
+  // Other body-parser rejections (oversized body, unsupported charset/encoding)
+  // are client errors with a 4xx `status` and a `type` - not server faults.
+  if (err instanceof Error && "type" in err && "status" in err) {
+    const status = Number((err as { status: unknown }).status);
+    if (status === 413) {
+      return new ApiError(413, "PAYLOAD_TOO_LARGE", "Request body is too large");
+    }
+    if (status === 415) {
+      return new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Unsupported request encoding");
+    }
+    if (status >= 400 && status < 500) {
+      return new ApiError(400, "BAD_REQUEST", "The request body could not be read");
+    }
+  }
+
   // Safety net for Prisma errors a service did not translate itself.
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === "P2025") return new ApiError(404, "NOT_FOUND", "Resource not found");

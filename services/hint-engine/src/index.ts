@@ -5,10 +5,11 @@ import { logger } from "./logger.js";
 const provider = createProvider();
 const server = createHintEngineServer(provider);
 
-server.listen(env.port, () => {
-  logger.info(`hint-engine listening on http://0.0.0.0:${env.port}`, {
+server.listen(env.port, env.host, () => {
+  logger.info(`hint-engine listening on http://${env.host}:${env.port}`, {
     env: env.NODE_ENV,
     provider: provider.name,
+    model: provider.model,
     configured: provider.isConfigured(),
   });
   if (!provider.isConfigured()) {

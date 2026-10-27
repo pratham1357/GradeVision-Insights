@@ -11,7 +11,12 @@ import { REALTIME_PATH } from "@gradevision/shared";
 import { io as ioClient, type Socket } from "socket.io-client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { signAccessToken } from "../modules/auth/jwt.js";
+import {
+  issueSessionToken,
+  revokeSession,
+  revokeUserSessions,
+  SESSION_COOKIE,
+} from "../modules/auth/sessions.js";
 import { attachRealtime } from "./io.js";
 
 const ID = {
@@ -22,6 +27,7 @@ const ID = {
   section: "aaaaaaaa-aaaa-4aaa-8aaa-000000000020",
   assessment: "aaaaaaaa-aaaa-4aaa-8aaa-000000000030",
   sessionA: "aaaaaaaa-aaaa-4aaa-8aaa-000000000041",
+  otherInstructor: "aaaaaaaa-aaaa-4aaa-8aaa-000000000004",
 } as const;
 
 let httpServer: HttpServer;
@@ -35,7 +41,7 @@ async function cleanup() {
   await prisma.section.deleteMany({ where: { id: ID.section } });
   await prisma.course.deleteMany({ where: { id: ID.course } });
   await prisma.user.deleteMany({
-    where: { id: { in: [ID.instructor, ID.studentA, ID.studentB] } },
+    where: { id: { in: [ID.instructor, ID.studentA, ID.studentB, ID.otherInstructor] } },
   });
 }
 
@@ -46,6 +52,7 @@ beforeAll(async () => {
       { id: ID.instructor, email: "aa-i@t.local", name: "I", role: "INSTRUCTOR" },
       { id: ID.studentA, email: "aa-a@t.local", name: "A", role: "STUDENT" },
       { id: ID.studentB, email: "aa-b@t.local", name: "B", role: "STUDENT" },
+      { id: ID.otherInstructor, email: "aa-i2@t.local", name: "I2", role: "INSTRUCTOR" },
     ],
   });
   await prisma.course.create({ data: { id: ID.course, code: "AA-RT", name: "RT" } });
@@ -87,12 +94,22 @@ afterAll(async () => {
   await cleanup();
 });
 
-function connect(token: string | undefined): Socket {
+function connect(token: string | undefined, cookie?: string): Socket {
   return ioClient(url, {
     path: REALTIME_PATH,
     auth: token ? { token } : {},
+    ...(cookie ? { extraHeaders: { cookie } } : {}),
     transports: ["websocket"],
     reconnection: false,
+  });
+}
+
+function subscribed(socket: Socket, message: object): Promise<string[]> {
+  return new Promise<string[]>((resolve, reject) => {
+    socket.on("subscribe:ok", (p: { rooms: string[] }) => resolve(p.rooms));
+    socket.on("subscribe:error", (p: { reason: string }) => reject(new Error(p.reason)));
+    socket.on("connect_error", (err) => reject(err));
+    socket.on("connect", () => socket.emit("subscribe", message));
   });
 }
 
@@ -107,7 +124,7 @@ describe("realtime ownership gate", () => {
   });
 
   it("lets a student subscribe to their own session", async () => {
-    const token = await signAccessToken({ sub: ID.studentA, role: "STUDENT" });
+    const token = await issueSessionToken(ID.studentA, "STUDENT");
     const socket = connect(token);
     const rooms = await new Promise<string[]>((resolve, reject) => {
       socket.on("subscribe:ok", (p: { rooms: string[] }) => resolve(p.rooms));
@@ -119,7 +136,7 @@ describe("realtime ownership gate", () => {
   });
 
   it("refuses a student subscribing to another student's session", async () => {
-    const token = await signAccessToken({ sub: ID.studentB, role: "STUDENT" });
+    const token = await issueSessionToken(ID.studentB, "STUDENT");
     const socket = connect(token);
     const reason = await new Promise<string>((resolve, reject) => {
       socket.on("subscribe:error", (p: { reason: string }) => resolve(p.reason));
@@ -131,7 +148,7 @@ describe("realtime ownership gate", () => {
   });
 
   it("refuses an instructor subscribing to an assessment they do not own", async () => {
-    const token = await signAccessToken({ sub: ID.studentB, role: "INSTRUCTOR" });
+    const token = await issueSessionToken(ID.otherInstructor, "INSTRUCTOR");
     const socket = connect(token);
     const reason = await new Promise<string>((resolve, reject) => {
       socket.on("subscribe:error", (p: { reason: string }) => resolve(p.reason));
@@ -140,5 +157,54 @@ describe("realtime ownership gate", () => {
     });
     expect(reason).toBe("not_found");
     socket.close();
+  });
+
+  it("authenticates a browser handshake by the HttpOnly session cookie", async () => {
+    const token = await issueSessionToken(ID.studentA, "STUDENT");
+    const socket = connect(undefined, `${SESSION_COOKIE}=${token}`);
+    expect(await subscribed(socket, { sessionId: ID.sessionA })).toContain(
+      `session:${ID.sessionA}`,
+    );
+    socket.close();
+  });
+
+  it("rejects a revoked session at the handshake", async () => {
+    const token = await issueSessionToken(ID.studentA, "STUDENT");
+    await revokeUserSessions(ID.studentA, "test");
+    const socket = connect(token);
+    await expect(subscribed(socket, { sessionId: ID.sessionA })).rejects.toThrow("unauthorized");
+    socket.close();
+  });
+
+  it("disconnects a live socket when its session is revoked (logout)", async () => {
+    const token = await issueSessionToken(ID.studentA, "STUDENT");
+    const socket = connect(token);
+    await subscribed(socket, { sessionId: ID.sessionA });
+    const sessionRow = await prisma.authSession.findFirstOrThrow({
+      where: { userId: ID.studentA, revokedAt: null },
+      orderBy: { createdAt: "desc" },
+    });
+    const disconnected = new Promise<string>((resolve) =>
+      socket.on("disconnect", (r) => resolve(r)),
+    );
+    await revokeSession(sessionRow.id, "logout");
+    expect(await disconnected).toBe("io server disconnect");
+  });
+
+  it("re-checks the user on every event: a deactivated user cannot subscribe", async () => {
+    const token = await issueSessionToken(ID.studentA, "STUDENT");
+    const socket = connect(token);
+    await new Promise<void>((resolve) => socket.on("connect", () => resolve()));
+    await prisma.user.update({ where: { id: ID.studentA }, data: { isActive: false } });
+    try {
+      const reason = await new Promise<string>((resolve) => {
+        socket.on("subscribe:error", (p: { reason: string }) => resolve(p.reason));
+        socket.emit("subscribe", { sessionId: ID.sessionA });
+      });
+      expect(reason).toBe("unauthorized");
+    } finally {
+      await prisma.user.update({ where: { id: ID.studentA }, data: { isActive: true } });
+      socket.close();
+    }
   });
 });

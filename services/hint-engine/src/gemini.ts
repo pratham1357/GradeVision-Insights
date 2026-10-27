@@ -31,6 +31,10 @@ export class GeminiProvider implements LLMProvider {
     this.config = config;
   }
 
+  get model(): string {
+    return this.config.model;
+  }
+
   isConfigured(): boolean {
     return Boolean(this.config.apiKey);
   }

@@ -13,7 +13,7 @@ export const JSON_BODY_LIMIT = "1mb";
 export const MAX_REQUEST_ID_LENGTH = 128;
 
 export const corsOptions: CorsOptions = {
-  origin: env.CORS_ORIGINS.includes("*") ? true : env.CORS_ORIGINS,
+  origin: env.CORS_ORIGINS,
   credentials: true,
 };
 

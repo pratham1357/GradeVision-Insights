@@ -10,7 +10,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../app.js";
-import { signAccessToken } from "./auth/jwt.js";
+import { issueSessionToken } from "./auth/sessions.js";
 
 const app = createApp();
 
@@ -66,7 +66,7 @@ async function cleanup(): Promise<void> {
 }
 
 async function bearer(userId: string, role: "INSTRUCTOR" | "STUDENT"): Promise<string> {
-  return `Bearer ${await signAccessToken({ sub: userId, role })}`;
+  return `Bearer ${await issueSessionToken(userId, role)}`;
 }
 
 let instructor = "";
@@ -407,6 +407,7 @@ describe("evidence replay", () => {
         source: "static",
         requestedAt: at(2).toISOString(),
         content: "Think about the complement.",
+        generatedBy: null,
         grantedAfter: null,
       },
     ]);
@@ -417,6 +418,7 @@ describe("evidence replay", () => {
         source: "ai",
         requestedAt: at(8).toISOString(),
         content: "Look at what you print for the sample.",
+        generatedBy: null,
         grantedAfter: { unsuccessfulAttempts: 1, latestOutcome: "FAILED" },
       },
     ]);

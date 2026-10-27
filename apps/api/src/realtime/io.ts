@@ -4,8 +4,14 @@ import { REALTIME_PATH } from "@gradevision/shared";
 import { Server, type Socket } from "socket.io";
 
 import { env } from "../env.js";
-import { verifyAccessToken } from "../modules/auth/jwt.js";
 import type { AuthContext } from "../modules/auth/auth.types.js";
+import {
+  recheckSession,
+  resolveSession,
+  SESSION_COOKIE,
+  sessionEvents,
+  type SessionsRevokedEvent,
+} from "../modules/auth/sessions.js";
 import { prisma } from "../services/database.js";
 import { logger } from "../utils/logger.js";
 import { RealtimeWatcher, type WatcherEmitter } from "./watcher.js";
@@ -14,11 +20,44 @@ export const sessionRoom = (sessionId: string): string => `session:${sessionId}`
 export const assessmentRoom = (assessmentId: string): string => `assessment:${assessmentId}`;
 
 /** Verifies a socket handshake token. Returns `null` for any failure. */
-export async function authenticateSocket(token: unknown): Promise<AuthContext | null> {
-  if (typeof token !== "string" || token.length === 0) return null;
+function cookieValue(header: string | undefined, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const index = part.indexOf("=");
+    if (index > 0 && part.slice(0, index).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(index + 1).trim());
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The same server-side session as the REST API: the browser's HttpOnly cookie
+ * (sent with the handshake), or an opaque session token for non-browser clients.
+ */
+export async function authenticateSocket(
+  token: unknown,
+  cookieHeader?: string,
+): Promise<AuthContext | null> {
+  const presented =
+    typeof token === "string" && token.length > 0
+      ? token
+      : cookieValue(cookieHeader, SESSION_COOKIE);
+  if (!presented) return null;
   try {
-    const claims = await verifyAccessToken(token);
-    return { userId: claims.sub, role: claims.role };
+    const session = await resolveSession(presented);
+    return session
+      ? {
+          userId: session.userId,
+          role: session.role,
+          sessionId: session.sessionId,
+          via: presented === token ? "bearer" : "cookie",
+        }
+      : null;
   } catch {
     return null;
   }
@@ -75,6 +114,7 @@ export function attachRealtime(httpServer: HttpServer): RealtimeHandle {
     const auth = await authenticateSocket(
       (socket.handshake.auth as { token?: unknown } | undefined)?.token ??
         socket.handshake.headers.authorization?.replace(/^Bearer\s+/i, ""),
+      socket.handshake.headers.cookie,
     );
     if (!auth) {
       next(new Error("unauthorized"));
@@ -83,6 +123,16 @@ export function attachRealtime(httpServer: HttpServer): RealtimeHandle {
     socket.data.auth = auth;
     next();
   });
+
+  // A revoked session (logout, deactivation, role change) loses its live sockets at once.
+  const onRevoked = ({ sessionIds }: SessionsRevokedEvent) => {
+    const ended = new Set(sessionIds);
+    for (const socket of io.sockets.sockets.values()) {
+      const auth = socket.data.auth as AuthContext | undefined;
+      if (auth && ended.has(auth.sessionId)) socket.disconnect(true);
+    }
+  };
+  sessionEvents.on("revoked", onRevoked);
 
   io.on("connection", (socket: Socket) => {
     const auth = socket.data.auth as AuthContext;
@@ -95,6 +145,15 @@ export function attachRealtime(httpServer: HttpServer): RealtimeHandle {
       };
       const rooms: string[] = [];
       try {
+        // Every event is re-authorized against the CURRENT session, user status
+        // and role - not just the handshake.
+        const current = await recheckSession(auth.sessionId);
+        if (!current) {
+          socket.emit("subscribe:error", { reason: "unauthorized" });
+          socket.disconnect(true);
+          return;
+        }
+        auth.role = current.role;
         if (typeof sessionId === "string" && auth.role === "STUDENT") {
           const assessment = await studentOwnsSession(sessionId, auth.userId);
           if (!assessment) {
@@ -145,6 +204,7 @@ export function attachRealtime(httpServer: HttpServer): RealtimeHandle {
     io,
     watcher,
     close: async () => {
+      sessionEvents.off("revoked", onRevoked);
       watcher.stop();
       await io.close();
     },

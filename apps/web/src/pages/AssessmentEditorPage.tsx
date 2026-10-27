@@ -388,6 +388,7 @@ function AssessmentQuestions({
                     variant="secondary"
                     disabled={busy || index === 0}
                     onClick={() => move(index, -1)}
+                    aria-label={`Move question ${index + 1} up`}
                   >
                     ↑
                   </Button>
@@ -395,6 +396,7 @@ function AssessmentQuestions({
                     variant="secondary"
                     disabled={busy || index === assessment.questions.length - 1}
                     onClick={() => move(index, 1)}
+                    aria-label={`Move question ${index + 1} down`}
                   >
                     ↓
                   </Button>

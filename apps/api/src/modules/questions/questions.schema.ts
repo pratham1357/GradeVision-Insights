@@ -93,8 +93,41 @@ export const saveRubricSchema = z.object({
   criteria: z.array(rubricCriterion).max(50),
 });
 
+export const hintStageParamsSchema = z.object({
+  questionId: z.uuid(),
+  stageId: z.uuid(),
+});
+
+/** Most stages a question may have; the hint prompt's stage goals top out at 4. */
+export const MAX_HINT_STAGES = 6;
+
+const HINT_DELIVERY_TYPES = ["STATIC", "INTERACTIVE"] as const;
+const hintContent = z.string().trim().max(2_000).nullish();
+
+export const createHintStageSchema = z
+  .object({
+    title: optionalText(120),
+    deliveryType: z.enum(HINT_DELIVERY_TYPES).default("STATIC"),
+    content: hintContent,
+  })
+  .refine(
+    (body) => body.deliveryType !== "STATIC" || Boolean(body.content && body.content.length > 0),
+    { message: "A written hint needs its text", path: ["content"] },
+  );
+
+export const updateHintStageSchema = z
+  .object({
+    title: optionalText(120),
+    deliveryType: z.enum(HINT_DELIVERY_TYPES),
+    content: hintContent,
+  })
+  .partial()
+  .refine((body) => Object.keys(body).length > 0, "At least one field is required");
+
 export type CreateQuestionInput = z.infer<typeof createQuestionSchema>;
 export type UpdateQuestionInput = z.infer<typeof updateQuestionSchema>;
 export type CreateTestCaseInput = z.infer<typeof createTestCaseSchema>;
 export type UpdateTestCaseInput = z.infer<typeof updateTestCaseSchema>;
 export type SaveRubricInput = z.infer<typeof saveRubricSchema>;
+export type CreateHintStageInput = z.infer<typeof createHintStageSchema>;
+export type UpdateHintStageInput = z.infer<typeof updateHintStageSchema>;

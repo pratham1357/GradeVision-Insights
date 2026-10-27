@@ -1,5 +1,6 @@
 import { Router } from "express";
 
+import { adminRouter } from "../modules/admin/admin.routes.js";
 import { assessmentsRouter } from "../modules/assessments/assessments.routes.js";
 import { authRouter } from "../modules/auth/auth.routes.js";
 import { conceptsRouter } from "../modules/concepts/concepts.routes.js";
@@ -28,4 +29,5 @@ apiRouter.use("/assessments", assessmentsRouter);
 apiRouter.use("/questions", questionsRouter);
 apiRouter.use("/concepts", conceptsRouter);
 apiRouter.use("/monitoring", monitoringRouter);
+apiRouter.use("/admin", adminRouter);
 apiRouter.use("/student", studentRouter);

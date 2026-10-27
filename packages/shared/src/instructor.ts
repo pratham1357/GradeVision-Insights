@@ -161,6 +161,22 @@ export interface RubricDto {
   criteria: RubricCriterionDto[];
 }
 
+/**
+ * One authored hint stage of a question (`/questions/:id/hint-stages`). Stages
+ * are numbered 1..n without gaps; students unlock them in order, on evidence
+ * (see the student hint policy). `STATIC` stages show `content`; `INTERACTIVE`
+ * stages are generated at request time by the local AI mentor.
+ */
+export interface InstructorHintStage {
+  id: string;
+  stageNumber: number;
+  title: string | null;
+  deliveryType: "STATIC" | "INTERACTIVE";
+  content: string | null;
+  /** Times this stage has been delivered. Used stages keep their delivered text (snapshots). */
+  usageCount: number;
+}
+
 export interface QuestionDetail {
   id: string;
   title: string;

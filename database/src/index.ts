@@ -7,3 +7,15 @@
 export * from "@prisma/client";
 export { prisma } from "./client.js";
 export { prisma as default } from "./client.js";
+export {
+  checkDemoTarget,
+  DEMO_SCOPE,
+  inspectDemoData,
+  resetDemoData,
+  SEED_ID_PREFIX,
+  serverDatabaseName,
+  tsxScriptCommand,
+  type DemoResetCounts,
+  type DemoTargetCheck,
+  type DemoTargetInput,
+} from "./demo-reset.js";

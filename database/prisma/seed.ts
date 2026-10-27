@@ -26,6 +26,7 @@ const prisma = new PrismaClient();
  *   instructor@example.edu   ->  instructor-dev-password
  *   student1@example.edu     ->  student-dev-password
  *   student2@example.edu     ->  student-dev-password
+ *   admin@example.edu        ->  admin-dev-password   (ADMIN: system health only)
  *
  * The values below are pre-computed Argon2id hashes (m=19456, t=2, p=1) of those
  * passwords - hard-coded so the seed stays deterministic and needs no crypto
@@ -33,6 +34,8 @@ const prisma = new PrismaClient();
  */
 const INSTRUCTOR_PASSWORD_HASH =
   "$argon2id$v=19$m=19456,t=2,p=1$vEnhhhWdFBqheoAydsybqQ$8GQMqr0xkXnoV7OpEYkMlp7SrM0s9M9Vxnaoz/iDzdU";
+const ADMIN_PASSWORD_HASH =
+  "$argon2id$v=19$m=19456,t=2,p=1$+RcGfU/JWxwafWau91dkmg$HUED5VRLkwRi1xWmY4TtngJSvUvwOhHkvlKP1sxBN6M";
 const STUDENT_PASSWORD_HASH =
   "$argon2id$v=19$m=19456,t=2,p=1$mpOuUrj4ATdQESCnCUuheA$4d6Pqekb47N/wNQinPoMty2DbUSG0xcRvqL0ogKVg0E";
 
@@ -41,6 +44,7 @@ const ids = {
   instructor: "00000000-0000-4000-8000-000000000001",
   student1: "00000000-0000-4000-8000-000000000002",
   student2: "00000000-0000-4000-8000-000000000003",
+  admin: "00000000-0000-4000-8000-000000000004",
   course: "00000000-0000-4000-8000-000000000010",
   section: "00000000-0000-4000-8000-000000000020",
   assessment: "00000000-0000-4000-8000-000000000030",
@@ -172,9 +176,12 @@ const QUESTIONS_PER_ASSESSMENT = 3;
 async function main(): Promise<void> {
   const instructor = await prisma.user.upsert({
     where: { email: "instructor@example.edu" },
+    // Name, role, password and active flag are restored on every seed, so a demo
+    // reset undoes a rehearsal's admin changes to the seeded accounts.
     update: {
       name: "Dev Instructor",
       role: UserRole.INSTRUCTOR,
+      isActive: true,
       passwordHash: INSTRUCTOR_PASSWORD_HASH,
     },
     create: {
@@ -188,7 +195,12 @@ async function main(): Promise<void> {
 
   const student1 = await prisma.user.upsert({
     where: { email: "student1@example.edu" },
-    update: { name: "Dev Student One", passwordHash: STUDENT_PASSWORD_HASH },
+    update: {
+      name: "Dev Student One",
+      role: UserRole.STUDENT,
+      isActive: true,
+      passwordHash: STUDENT_PASSWORD_HASH,
+    },
     create: {
       id: ids.student1,
       email: "student1@example.edu",
@@ -200,13 +212,36 @@ async function main(): Promise<void> {
 
   const student2 = await prisma.user.upsert({
     where: { email: "student2@example.edu" },
-    update: { name: "Dev Student Two", passwordHash: STUDENT_PASSWORD_HASH },
+    update: {
+      name: "Dev Student Two",
+      role: UserRole.STUDENT,
+      isActive: true,
+      passwordHash: STUDENT_PASSWORD_HASH,
+    },
     create: {
       id: ids.student2,
       email: "student2@example.edu",
       name: "Dev Student Two",
       role: UserRole.STUDENT,
       passwordHash: STUDENT_PASSWORD_HASH,
+    },
+  });
+
+  // ADMIN today only sees system health (GET /monitoring/system); no authoring.
+  await prisma.user.upsert({
+    where: { email: "admin@example.edu" },
+    update: {
+      name: "Dev Admin",
+      role: UserRole.ADMIN,
+      isActive: true,
+      passwordHash: ADMIN_PASSWORD_HASH,
+    },
+    create: {
+      id: ids.admin,
+      email: "admin@example.edu",
+      name: "Dev Admin",
+      role: UserRole.ADMIN,
+      passwordHash: ADMIN_PASSWORD_HASH,
     },
   });
 
@@ -953,7 +988,8 @@ async function main(): Promise<void> {
   // --- Assessments -------------------------------------------------------
   const assessment = await prisma.assessment.upsert({
     where: { id: ids.assessment },
-    update: {},
+    // Restored on every seed so a demo reset returns it to DRAFT after a rehearsal.
+    update: { status: AssessmentStatus.DRAFT },
     create: {
       id: ids.assessment,
       title: "CS101 - Practice Assessment 1",

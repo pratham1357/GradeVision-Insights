@@ -1,9 +1,10 @@
 import type { UserRole } from "@gradevision/database";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 
+import { env } from "../../env.js";
 import { ApiError } from "../../utils/api-error.js";
 import type { AuthContext } from "./auth.types.js";
-import { verifyAccessToken } from "./jwt.js";
+import { csrfTokenMatches, resolveSession, SESSION_COOKIE } from "./sessions.js";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Express type augmentation
@@ -15,6 +16,26 @@ declare global {
   }
 }
 
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/** Minimal cookie-header parser (no dependency); returns the named cookie's value. */
+export function readCookie(req: Request, name: string): string | null {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const index = part.indexOf("=");
+    if (index < 0) continue;
+    if (part.slice(0, index).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(index + 1).trim());
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 function bearerToken(req: Request): string | null {
   const header = req.header("authorization") ?? "";
   if (!header.startsWith("Bearer ")) return null;
@@ -23,22 +44,47 @@ function bearerToken(req: Request): string | null {
 }
 
 /**
- * Authentication: verifies `Authorization: Bearer <jwt>` and attaches the
- * verified identity to `req.auth`. Rejects missing/malformed/invalid/expired
- * tokens with 401. Never trusts identity or role from the request body.
+ * A state-changing request authenticated by the browser cookie must come from
+ * an allowed origin. Browsers always send `Origin` on such fetches; absence
+ * means a non-browser caller, which must use the bearer form instead.
  */
-export async function authenticate(
-  req: Request,
-  _res: Response,
-  next: NextFunction,
-): Promise<void> {
+export function originAllowed(req: Request): boolean {
+  const origin = req.header("origin");
+  if (origin) return env.CORS_ORIGINS.includes(origin);
+  const referer = req.header("referer");
+  if (referer && URL.canParse(referer)) return env.CORS_ORIGINS.includes(new URL(referer).origin);
+  return false;
+}
+
+/**
+ * Authentication: resolves the server-side session (cookie or bearer) and the
+ * user's CURRENT role and status from the database. Cookie-authenticated
+ * state-changing requests also need an allowed Origin and the CSRF token.
+ */
+export async function authenticate(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const token = bearerToken(req);
+    const cookie = readCookie(req, SESSION_COOKIE);
+    const bearer = bearerToken(req);
+    const token = bearer ?? cookie;
     if (!token) {
       throw new ApiError(401, "UNAUTHORIZED", "Authentication required");
     }
-    const claims = await verifyAccessToken(token);
-    req.auth = { userId: claims.sub, role: claims.role };
+    const session = await resolveSession(token);
+    if (!session) {
+      if (!bearer && cookie) clearSessionCookie(res);
+      throw new ApiError(401, "UNAUTHORIZED", "Your session has ended. Please sign in again.");
+    }
+    const via = bearer ? "bearer" : "cookie";
+    if (via === "cookie" && !SAFE_METHODS.has(req.method)) {
+      if (!originAllowed(req) || !csrfTokenMatches(session.sessionId, req.header("x-csrf-token"))) {
+        throw new ApiError(
+          403,
+          "CSRF_FAILED",
+          "The request could not be verified. Reload the page.",
+        );
+      }
+    }
+    req.auth = { userId: session.userId, role: session.role, sessionId: session.sessionId, via };
     next();
   } catch (error) {
     next(
@@ -49,6 +95,19 @@ export async function authenticate(
   }
 }
 
+export function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: env.SESSION_COOKIE_SECURE,
+    sameSite: env.SESSION_COOKIE_SAMESITE,
+    path: "/",
+  } as const;
+}
+
+export function clearSessionCookie(res: Response): void {
+  res.clearCookie(SESSION_COOKIE, sessionCookieOptions());
+}
+
 /** Guard: request must be authenticated. */
 export function requireAuth(): RequestHandler[] {
   return [authenticate];
@@ -56,7 +115,7 @@ export function requireAuth(): RequestHandler[] {
 
 /**
  * Authorization: request must be authenticated AND hold one of `roles`.
- * Authentication (401) and authorization (403) stay distinct.
+ * Returns the middleware chain so routes can spread it.
  */
 export function requireRole(...roles: UserRole[]): RequestHandler[] {
   const authorize: RequestHandler = (req, _res, next) => {

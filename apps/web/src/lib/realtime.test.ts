@@ -2,10 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { connectRealtime, type SocketFactory } from "./realtime";
 
-vi.mock("./auth-storage", () => ({
-  tokenStorage: { get: () => "test-token", set: vi.fn(), clear: vi.fn() },
-}));
-
 /** Minimal fake socket: records listeners and lets a test drive events. */
 function fakeSocket() {
   const listeners = new Map<string, (payload?: unknown) => void>();
@@ -41,6 +37,13 @@ function harness() {
     onStatus: vi.fn(),
   };
   const dispose = connectRealtime({ sessionId: "s1" }, events, factory);
+  // The handshake authenticates with the HttpOnly session cookie - no token in JS.
+  const options = (factory as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![1] as Record<
+    string,
+    unknown
+  >;
+  expect(options.withCredentials).toBe(true);
+  expect(options).not.toHaveProperty("auth");
   return { socket, events, dispose };
 }
 

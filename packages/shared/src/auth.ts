@@ -1,8 +1,10 @@
 /**
  * Authentication contract shared by the API and the web client.
  *
- * First-stage design: short-lived JWT access tokens only. Refresh tokens, SSO,
- * and registration are deliberately not modelled here yet.
+ * Backend-for-frontend sessions: the browser holds an opaque session id in an
+ * HttpOnly cookie (never readable by page scripts) and sends a session-bound
+ * CSRF token on state-changing requests. No access token is ever stored in
+ * browser storage.
  */
 
 /**
@@ -27,10 +29,24 @@ export interface AuthenticatedAccount extends AuthUser {
 export interface LoginRequest {
   email: string;
   password: string;
+  /** `cookie` (default, browsers) or `token` (non-browser clients, when enabled). */
+  mode?: "cookie" | "token";
 }
 
-/** `data` payload of a successful `POST /auth/login`. */
+/**
+ * `data` payload of a successful `POST /auth/login`. Browsers get the session
+ * in an HttpOnly cookie and only the CSRF token here; `accessToken` (the opaque
+ * session token) is present only in `token` mode.
+ */
 export interface LoginResult {
-  accessToken: string;
   user: AuthUser;
+  csrfToken: string;
+  expiresAt: string;
+  accessToken?: string;
+}
+
+/** `GET /auth/session` - the current session's user and its CSRF token. */
+export interface SessionInfo {
+  user: AuthenticatedAccount;
+  csrfToken: string;
 }

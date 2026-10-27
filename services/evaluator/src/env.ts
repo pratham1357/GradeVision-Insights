@@ -9,6 +9,8 @@ import { z } from "zod";
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   EVALUATOR_PORT: z.coerce.number().int().positive().max(65535).default(4100),
+  // The evaluator only serves /health; it takes no inbound work. Loopback by default.
+  EVALUATOR_HOST: z.string().min(1).default("127.0.0.1"),
 
   DATABASE_URL: z.string().min(1),
 
@@ -78,10 +80,23 @@ if (!parsed.success) {
 
 const raw = parsed.data;
 
+// Production safety gate: the local provider runs untrusted code as child
+// processes with no sandbox (no memory/CPU/network/filesystem isolation). It
+// must never run in a production deployment - fail closed instead.
+if (raw.NODE_ENV === "production" && raw.LOCAL_EXECUTION_ENABLED) {
+  console.error(
+    "Refusing to start: LOCAL_EXECUTION_ENABLED is set with NODE_ENV=production. " +
+      "Local execution has no sandbox. Use a verified isolated execution service " +
+      "(see docs/EXECUTION_ISOLATION.md) or leave execution unconfigured.",
+  );
+  process.exit(1);
+}
+
 export const env = Object.freeze({
   NODE_ENV: raw.NODE_ENV,
   isTest: raw.NODE_ENV === "test",
   port: raw.EVALUATOR_PORT,
+  host: raw.EVALUATOR_HOST,
   databaseUrl: raw.DATABASE_URL,
   redisUrl: raw.REDIS_URL ?? null,
   judge0: raw.JUDGE0_URL

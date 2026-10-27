@@ -8,7 +8,7 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../app.js";
-import { signAccessToken } from "./auth/jwt.js";
+import { issueSessionToken } from "./auth/sessions.js";
 
 const app = createApp();
 
@@ -26,7 +26,7 @@ const ID = {
 const RAW_EVALUATOR_ERROR = "connect ECONNREFUSED 127.0.0.1:2358 (secret internal detail)";
 
 async function bearer(userId: string, role: "INSTRUCTOR" | "STUDENT"): Promise<string> {
-  return `Bearer ${await signAccessToken({ sub: userId, role })}`;
+  return `Bearer ${await issueSessionToken(userId, role)}`;
 }
 
 async function cleanup(): Promise<void> {

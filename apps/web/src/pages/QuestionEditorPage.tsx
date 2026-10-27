@@ -11,6 +11,7 @@ import {
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { HintStageEditor } from "../components/HintStageEditor";
 import type { QuestionInput, RubricCriterionInput, TestCaseInput } from "../lib/instructor-api";
 import { instructorApi } from "../lib/instructor-api";
 import { messageFromError, useApi } from "../lib/use-api";
@@ -135,6 +136,7 @@ function EditQuestion({ id }: { id: string }) {
       />
       <TestCaseEditor question={data} onChanged={reload} />
       <RubricEditor question={data} onChanged={reload} />
+      <HintStageEditor questionId={id} />
     </div>
   );
 }
@@ -715,17 +717,27 @@ function RubricEditor({
                   value={row.name}
                   onChange={(e) => update(row.key, { name: e.target.value })}
                 />
-                <Button variant="secondary" disabled={index === 0} onClick={() => move(index, -1)}>
+                <Button
+                  variant="secondary"
+                  disabled={index === 0}
+                  onClick={() => move(index, -1)}
+                  aria-label={`Move criterion ${index + 1} up`}
+                >
                   ↑
                 </Button>
                 <Button
                   variant="secondary"
                   disabled={index === rows.length - 1}
                   onClick={() => move(index, 1)}
+                  aria-label={`Move criterion ${index + 1} down`}
                 >
                   ↓
                 </Button>
-                <Button variant="danger" onClick={() => remove(row.key)}>
+                <Button
+                  variant="danger"
+                  onClick={() => remove(row.key)}
+                  aria-label={`Remove criterion ${index + 1}`}
+                >
                   ✕
                 </Button>
               </div>

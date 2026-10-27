@@ -36,15 +36,32 @@ export class HintProviderUnavailableError extends Error {
 }
 
 interface HintEngineResponse {
-  data?: { hint?: unknown };
+  data?: { hint?: unknown; provider?: unknown; model?: unknown; validator?: unknown };
   hint?: unknown;
 }
 
+/** A generated hint plus where it came from - persisted with the usage row, never sent to the browser. */
+export interface InteractiveHint {
+  hint: string;
+  provider: string | null;
+  model: string | null;
+  validator: string | null;
+}
+
+/** Defensive ceiling; the hint-engine's validator already enforces a much tighter one. */
+const MAX_DELIVERED_HINT_CHARS = 2_000;
+
+const optionalLabel = (value: unknown): string | null =>
+  typeof value === "string" && value.length > 0 && value.length <= 200 ? value : null;
+
 /**
- * Ask the hint-engine for an interactive hint. Resolves with guidance text or
- * rejects with `HintProviderUnavailableError` - callers translate that to a 503.
+ * Ask the hint-engine for an interactive hint. Resolves with validated guidance
+ * text and its provenance, or rejects with `HintProviderUnavailableError` -
+ * callers translate that to a 503.
  */
-export async function requestInteractiveHint(context: InteractiveHintContext): Promise<string> {
+export async function requestInteractiveHint(
+  context: InteractiveHintContext,
+): Promise<InteractiveHint> {
   const url = `${env.HINT_ENGINE_URL}/hints`;
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (env.INTERNAL_SERVICE_TOKEN) {
@@ -57,7 +74,7 @@ export async function requestInteractiveHint(context: InteractiveHintContext): P
       method: "POST",
       headers,
       body: JSON.stringify(context),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(env.HINT_ENGINE_TIMEOUT_MS),
     });
   } catch (error) {
     logger.warn("hint-engine request failed", {
@@ -78,8 +95,17 @@ export async function requestInteractiveHint(context: InteractiveHintContext): P
 
   const body = (await response.json().catch(() => ({}))) as HintEngineResponse;
   const hint = body.data?.hint ?? body.hint;
-  if (typeof hint !== "string" || hint.trim().length === 0) {
+  if (
+    typeof hint !== "string" ||
+    hint.trim().length === 0 ||
+    hint.length > MAX_DELIVERED_HINT_CHARS
+  ) {
     throw new HintProviderUnavailableError();
   }
-  return hint.trim();
+  return {
+    hint: hint.trim(),
+    provider: optionalLabel(body.data?.provider),
+    model: optionalLabel(body.data?.model),
+    validator: optionalLabel(body.data?.validator),
+  };
 }

@@ -8,6 +8,7 @@ import {
   requestId,
   requestLogger,
   requestMetricsMiddleware,
+  securityHeaders,
 } from "./middleware/index.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { apiRouter } from "./routes/index.js";
@@ -27,6 +28,7 @@ export function createApp(): Express {
   app.use(requestMetricsMiddleware);
 
   // Security / parsing baseline
+  app.use(securityHeaders);
   app.use(cors(corsOptions));
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
   app.use(express.urlencoded({ extended: false, limit: JSON_BODY_LIMIT }));

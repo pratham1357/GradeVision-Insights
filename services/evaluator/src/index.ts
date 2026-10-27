@@ -35,8 +35,8 @@ const server = createServer((req, res) => {
   res.end(JSON.stringify({ error: "not_found" }));
 });
 
-server.listen(env.port, () => {
-  logger.info(`evaluator listening on http://0.0.0.0:${env.port}`, { env: env.NODE_ENV });
+server.listen(env.port, env.host, () => {
+  logger.info(`evaluator listening on http://${env.host}:${env.port}`, { env: env.NODE_ENV });
   runner.start();
 });
 

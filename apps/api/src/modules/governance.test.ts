@@ -13,7 +13,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../app.js";
-import { signAccessToken } from "./auth/jwt.js";
+import { issueSessionToken } from "./auth/sessions.js";
 
 const app = createApp();
 
@@ -72,7 +72,7 @@ async function cleanup(): Promise<void> {
 }
 
 async function bearer(userId: string, role: "INSTRUCTOR" | "STUDENT"): Promise<string> {
-  return `Bearer ${await signAccessToken({ sub: userId, role })}`;
+  return `Bearer ${await issueSessionToken(userId, role)}`;
 }
 
 let instructorA = "";
@@ -133,6 +133,15 @@ async function session(assessmentId: string, studentId: string): Promise<string>
   return row.id;
 }
 
+/**
+ * Replay orders hints against attempts by timestamp. Database defaults
+ * (`createdAt`) and Node's `new Date()` come from different clocks that can be
+ * a few ms apart, so the fixtures take both from one monotonic clock, in
+ * insertion order, starting a minute in the past.
+ */
+let fixtureClock = Date.now() - 60_000;
+const tick = () => new Date((fixtureClock += 10));
+
 async function graded(
   key: string,
   sessionId: string,
@@ -148,6 +157,7 @@ async function graded(
       language: "PYTHON",
       sourceCode: `# ${key}`,
       attemptNumber,
+      createdAt: tick(),
       status: "COMPLETED",
       transferSourceQuestionId: transferSourceQuestionId ?? null,
     },
@@ -183,7 +193,7 @@ async function hint(sessionId: string, questionId: string, stageId: string, stud
       studentId,
       questionId,
       status: "CONSUMED",
-      consumedAt: new Date(),
+      consumedAt: tick(),
     },
   });
 }

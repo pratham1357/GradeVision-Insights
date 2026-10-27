@@ -159,9 +159,31 @@ model User {
   hintUsages          HintUsage[]
   resolvedViolations  Violation[]   @relation("ViolationResolvedBy")
   auditEvents         AuditEvent[]  @relation("AuditActor")
+  authSessions        AuthSession[]
 
   @@index([role])
   @@map("users")
+}
+
+// Server-side login session (backend-for-frontend). The browser holds only an
+// opaque random identifier in an HttpOnly cookie; only its SHA-256 hash is
+// stored here. Revoked on logout, deactivation and role change.
+model AuthSession {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  userId        String    @db.Uuid
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash     String    @unique
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  // Absolute lifetime; the idle timeout is enforced from lastSeenAt.
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+  userAgent     String?
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
 }
 
 model Course {

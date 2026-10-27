@@ -37,7 +37,7 @@ export function Button({
   loading?: boolean;
 }) {
   const styles = {
-    primary: "bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300 shadow-sm",
+    primary: "bg-blue-600 text-white hover:bg-blue-700 disabled:hover:bg-blue-600 shadow-sm",
     secondary: "bg-white text-neutral-800 border border-neutral-300 hover:bg-neutral-50",
     danger: "bg-white text-red-700 border border-red-300 hover:bg-red-50",
     ghost: "bg-transparent text-neutral-600 hover:bg-neutral-100",
@@ -45,7 +45,7 @@ export function Button({
   const sizing = size === "sm" ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm";
   return (
     <button
-      className={`inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition disabled:cursor-not-allowed ${sizing} ${styles} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${sizing} ${styles} ${className}`}
       disabled={disabled || loading}
       {...props}
     >
@@ -173,11 +173,15 @@ export function Alert({
     warning: "bg-amber-50 text-amber-900 border-amber-200",
   }[kind];
   return (
-    <div className={`rounded-md border px-3 py-2 text-sm ${styles}`}>
+    <div
+      role={kind === "error" ? "alert" : undefined}
+      className={`rounded-md border px-3 py-2 text-sm ${styles}`}
+    >
       {title ? <p className="font-medium">{title}</p> : null}
       <div className={title ? "mt-0.5" : ""}>{children}</div>
       {onRetry ? (
         <button
+          type="button"
           onClick={onRetry}
           className="mt-1.5 rounded border border-black/15 bg-white/60 px-2 py-0.5 text-xs font-medium hover:bg-white"
         >
@@ -231,7 +235,10 @@ export function StatTile({
 
 export function Spinner({ label = "Loading…" }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 py-10 text-sm text-neutral-500">
+    <div
+      role="status"
+      className="flex items-center justify-center gap-2 py-10 text-sm text-neutral-500"
+    >
       <InlineSpinner className="text-neutral-400" />
       {label}
     </div>

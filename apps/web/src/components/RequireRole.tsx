@@ -51,3 +51,7 @@ export function RequireInstructor() {
 export function RequireStudent() {
   return <RequireRole role="STUDENT" homeHref="/student" areaLabel="Student" />;
 }
+
+export function RequireAdmin() {
+  return <RequireRole role="ADMIN" homeHref="/admin" areaLabel="Admin" />;
+}

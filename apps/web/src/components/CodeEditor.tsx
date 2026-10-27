@@ -2,10 +2,11 @@ import type { ProgrammingLanguage } from "@gradevision/shared";
 import Editor from "@monaco-editor/react";
 
 import { monacoLanguage } from "../lib/monaco";
+import "../lib/monaco-setup";
 
 /**
- * Monaco editor for exam code. Authoring only - it never runs code. Monaco itself
- * is loaded on demand by `@monaco-editor/react` (from a CDN by default).
+ * Monaco editor for exam code. Authoring only - it never runs code. Monaco is
+ * bundled with the app (see `monaco-setup.ts`), so it works offline.
  */
 export function CodeEditor({
   language,

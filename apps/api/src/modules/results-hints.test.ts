@@ -15,10 +15,16 @@ vi.mock("../services/hint-engine.js", async (importOriginal) => {
 
 import { createApp } from "../app.js";
 import { HintProviderUnavailableError, requestInteractiveHint } from "../services/hint-engine.js";
-import { signAccessToken } from "./auth/jwt.js";
+import { issueSessionToken } from "./auth/sessions.js";
 
 const app = createApp();
 const mockHint = vi.mocked(requestInteractiveHint);
+const aiHint = (hint: string) => ({
+  hint,
+  provider: "ollama",
+  model: "qwen2.5:1.5b-instruct",
+  validator: "hint-output-v1",
+});
 
 const ID = {
   instructorA: "cccccccc-cccc-4ccc-8ccc-000000000001",
@@ -64,7 +70,7 @@ async function cleanup(): Promise<void> {
 }
 
 async function bearer(userId: string, role: "INSTRUCTOR" | "STUDENT"): Promise<string> {
-  return `Bearer ${await signAccessToken({ sub: userId, role })}`;
+  return `Bearer ${await issueSessionToken(userId, role)}`;
 }
 
 let studentA = "";
@@ -511,7 +517,7 @@ describe("progressive hints", () => {
     expect(locked3.body.error.message).toBe("Available after 1 more unsuccessful attempt");
 
     await seedFailedAttempt(sessionId, 2);
-    mockHint.mockResolvedValueOnce("What does your parsing return for a blank line?");
+    mockHint.mockResolvedValueOnce(aiHint("What does your parsing return for a blank line?"));
     expect((await post(3)).status).toBe(201);
     expect((await post(4)).status).toBe(409);
 
@@ -597,7 +603,7 @@ describe("progressive hints", () => {
   });
 
   it("returns AI guidance for an interactive stage", async () => {
-    mockHint.mockResolvedValueOnce("Trace what happens when the two values are equal.");
+    mockHint.mockResolvedValueOnce(aiHint("Trace what happens when the two values are equal."));
     const sessionId = await startSession(ID.studentA);
     const url = `/api/v1/student/sessions/${sessionId}/questions/${ID.question}/hints`;
     await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 1 });
@@ -655,12 +661,52 @@ describe("progressive hints", () => {
     const usage = await prisma.hintUsage.findFirst({ where: { hintStageId: ID.stage3 } });
     expect(usage?.detail).toMatchObject({
       hint: "Trace what happens when the two values are equal.",
+      source: "ai",
+      provider: "ollama",
+      model: "qwen2.5:1.5b-instruct",
+      validator: "hint-output-v1",
       evidence: { evaluatedAttempts: 2, unsuccessfulAttempts: 2, latestOutcome: "FAILED" },
     });
+    // Provenance is evidence for the instructor; the student only gets the text.
+    expect(JSON.stringify(res.body)).not.toContain("qwen2.5");
+    expect(JSON.stringify(res.body)).not.toContain("ollama");
+  });
+
+  it("snapshots static hint text so a later edit never rewrites delivered history", async () => {
+    const original = "Think about what operation the problem is really asking for.";
+    const sessionId = await startSession(ID.studentA);
+    const url = `/api/v1/student/sessions/${sessionId}/questions/${ID.question}/hints`;
+    const s1 = await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 1 });
+    expect(s1.status).toBe(201);
+
+    const usage = await prisma.hintUsage.findFirst({
+      where: { examSessionId: sessionId, hintStageId: ID.stage1 },
+    });
+    expect(usage?.detail).toMatchObject({ hint: original, source: "static" });
+
+    try {
+      await prisma.hintStage.update({
+        where: { id: ID.stage1 },
+        data: { content: "EDITED AFTER DELIVERY" },
+      });
+      // The student's listing and a repeat request still show what was delivered.
+      const list = await request(app).get(url).set("Authorization", studentA);
+      const st1 = (list.body.data.stages as { stageNumber: number; content: string | null }[]).find(
+        (s) => s.stageNumber === 1,
+      );
+      expect(st1?.content).toBe(original);
+      const again = await request(app)
+        .post(url)
+        .set("Authorization", studentA)
+        .send({ stageNumber: 1 });
+      expect(again.body.data.content).toBe(original);
+    } finally {
+      await prisma.hintStage.update({ where: { id: ID.stage1 }, data: { content: original } });
+    }
   });
 
   it("tells the AI about progression, and about grader failures without blaming the student", async () => {
-    mockHint.mockResolvedValueOnce("Look at the second value.");
+    mockHint.mockResolvedValueOnce(aiHint("Look at the second value."));
     const sessionId = await startSession(ID.studentA);
     const url = `/api/v1/student/sessions/${sessionId}/questions/${ID.question}/hints`;
     await request(app).post(url).set("Authorization", studentA).send({ stageNumber: 1 });

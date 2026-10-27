@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiClientError, apiRequest } from "./api-client";
+import { ApiClientError, apiRequest, onUnauthorized } from "./api-client";
+import { sessionStore } from "./session-store";
 
-vi.mock("./auth-storage", () => ({
-  tokenStorage: { get: () => "test-token", set: vi.fn(), clear: vi.fn() },
-}));
+afterEach(() => {
+  vi.unstubAllGlobals();
+  sessionStore.clear();
+});
 
-afterEach(() => vi.unstubAllGlobals());
+const respond = (status: number, body: unknown) => {
+  const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify(body), { status })));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+};
 
 describe("apiRequest error handling", () => {
   it("maps a failed fetch (offline) to a friendly network error, not a raw TypeError", async () => {
@@ -59,5 +65,65 @@ describe("apiRequest error handling", () => {
       ),
     );
     await expect(apiRequest<{ ok: number }>("/x")).resolves.toEqual({ ok: 1 });
+  });
+
+  it("always sends the session cookie and never an Authorization header", async () => {
+    const fetchMock = respond(200, { data: { ok: 1 } });
+    await apiRequest("/student/assessments");
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.credentials).toBe("include");
+    expect(new Headers(init.headers).has("Authorization")).toBe(false);
+  });
+
+  it("adds the CSRF token to state-changing requests only", async () => {
+    sessionStore.setCsrfToken("csrf-123");
+    const fetchMock = respond(200, { data: {} });
+    await apiRequest("/x", { method: "POST", body: "{}" });
+    await apiRequest("/x");
+    const [[, post], [, get]] = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(new Headers(post!.headers).get("X-CSRF-Token")).toBe("csrf-123");
+    expect(new Headers(get!.headers).has("X-CSRF-Token")).toBe(false);
+  });
+
+  it("treats a 204 No Content as success", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(null, { status: 204 }))),
+    );
+    await expect(apiRequest("/auth/logout", { method: "POST" })).resolves.toBeUndefined();
+  });
+
+  it("ends the session once on a 401 and forgets the CSRF token", async () => {
+    sessionStore.setCsrfToken("csrf-123");
+    const listener = vi.fn();
+    const unsubscribe = onUnauthorized(listener);
+    respond(401, { error: { code: "UNAUTHORIZED", message: "Your session has ended" } });
+    const err = (await apiRequest("/student/assessments").catch((e) => e)) as ApiClientError;
+    expect(err.status).toBe(401);
+    expect(listener).toHaveBeenCalledOnce();
+    expect(sessionStore.getCsrfToken()).toBeNull();
+    unsubscribe();
+  });
+
+  it("does not end the session on a 403 (wrong role) or a 404", async () => {
+    const listener = vi.fn();
+    const unsubscribe = onUnauthorized(listener);
+    respond(403, { error: { code: "FORBIDDEN", message: "nope" } });
+    await apiRequest("/assessments").catch(() => undefined);
+    respond(404, { error: { code: "NOT_FOUND", message: "nope" } });
+    await apiRequest("/assessments/x").catch(() => undefined);
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("does not treat a failed sign-in or the anonymous session probe as an ended session", async () => {
+    const listener = vi.fn();
+    const unsubscribe = onUnauthorized(listener);
+    respond(401, { error: { code: "INVALID_CREDENTIALS", message: "Invalid email or password" } });
+    await apiRequest("/auth/login", { method: "POST", body: "{}" }).catch(() => undefined);
+    respond(401, { error: { code: "UNAUTHORIZED", message: "Authentication required" } });
+    await apiRequest("/auth/session").catch(() => undefined);
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
   });
 });

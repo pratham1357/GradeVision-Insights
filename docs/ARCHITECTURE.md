@@ -136,15 +136,17 @@ sheet (19 MiB / t=2 / p=1). `hashPassword` / `verifyPassword` live in
 returned by the API. Unknown-email logins still run a dummy verify so response
 timing does not reveal whether an account exists.
 
-**JWT contents** — `{ sub: <userId>, role: <UserRole>, iat, exp }` and nothing
-else: no name, no email, no password, no mutable state. Secret and lifetime come
-from `JWT_SECRET` / `JWT_EXPIRES_IN` (validated in `env.ts`; the API refuses to
-start without a ≥32-char secret). The secret is never logged and never reaches
-the frontend.
+**Sessions** — server-side (backend-for-frontend): an opaque random token in
+an HttpOnly, SameSite=Strict cookie, only its SHA-256 hash in `auth_sessions`,
+CSRF tokens bound to the session, idle + absolute expiry, revocation on
+logout / role change / deactivation / password reset, and the user's role and
+status re-read from the database on every request. Full design, configuration,
+tests and the OIDC milestone: [AUTH.md](AUTH.md). (This replaced the first-stage
+JWT access tokens on 2026-10-26.)
 
 **Authentication vs authorization** — separate middleware. `authenticate`
-answers "who is this?" purely from the verified token (identity/role from the
-request body is never trusted). `requireRole(...roles)` answers "may they?" and
+answers "who is this?" from the server-side session (identity/role from the
+request is never trusted). `requireRole(...roles)` answers "may they?" and
 returns 403 for an authenticated user without a listed role. `requireAuth()` /
 `requireRole()` are factories returning `[authenticate, ...]`, so a route opts in
 explicitly and role checks never live inside controllers.

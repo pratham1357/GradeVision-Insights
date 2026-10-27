@@ -22,6 +22,14 @@ Each question has ordered `HintStage` rows:
 `STATIC` stages return `HintStage.content` from the database. `INTERACTIVE`
 stages call the hint-engine.
 
+Instructors author stages per question in the question editor
+(`GET/POST /api/v1/questions/:id/hint-stages`,
+`PATCH/DELETE /api/v1/questions/:id/hint-stages/:stageId`, owner-only, 404
+otherwise). Stages stay numbered 1..n without gaps: new stages are appended,
+only the last stage can be removed, and never once it has been delivered (it is
+part of a student's evidence record). A question has at most 6 stages; a
+`STATIC` stage needs text.
+
 ### Endpoints
 
 - `GET /api/v1/student/sessions/:sid/questions/:qid/hints` — every stage with
@@ -62,12 +70,82 @@ every test …`). The listing endpoint returns the same reason as
 ```ts
 interface LLMProvider {
   readonly name: string;
+  readonly model: string | null; // recorded as provenance
   isConfigured(): boolean;
   generateHint(request: HintRequest): Promise<string>; // never a full solution
 }
 ```
 
-`GeminiProvider` is the v1 implementation — plain `fetch` to the Gemini REST
+`LLM_PROVIDER` selects **exactly one** provider. There is no fallback chain: if
+the selected provider fails, the hint request fails clearly - it is never sent
+to a different (e.g. cloud) model.
+
+| `LLM_PROVIDER`       | Implementation   | Notes                                                               |
+| -------------------- | ---------------- | ------------------------------------------------------------------- |
+| `ollama` _(default)_ | `OllamaProvider` | local model via `POST /api/chat` (non-streaming); loopback URL only |
+| `gemini`             | `GeminiProvider` | explicit opt-in to a cloud model; needs `GEMINI_API_KEY`            |
+| `none`               | -                | AI stage disabled (503); written hints still work                   |
+
+| Ollama variable     | Default                  | Notes                                                     |
+| ------------------- | ------------------------ | --------------------------------------------------------- |
+| `OLLAMA_BASE_URL`   | `http://127.0.0.1:11434` | must be loopback - the service refuses to start otherwise |
+| `OLLAMA_MODEL`      | `qwen2.5:1.5b-instruct`  | exact tag; recorded with every delivered AI hint          |
+| `OLLAMA_TIMEOUT_MS` | `60000`                  | per generation (CPU inference)                            |
+| `OLLAMA_KEEP_ALIVE` | `30m`                    | keeps the model loaded between hints                      |
+| `OLLAMA_NUM_CTX`    | `2048`                   | context window; the prompt is well under it               |
+
+Ollama can proxy cloud-hosted models through tags ending in `-cloud`; the
+hint-engine refuses such an `OLLAMA_MODEL` at startup, so the local provider
+can never become a silent cloud call. Generation is capped at 220 tokens. The API waits up to
+`HINT_ENGINE_TIMEOUT_MS` (default 20 s; 90 s in the local profile) for the
+hint-engine. The hint-engine binds to `HINT_ENGINE_HOST` (default `127.0.0.1`)
+and **requires** `INTERNAL_SERVICE_TOKEN` (>= 32 chars, compared in constant
+time); it refuses to start without one. Run Ollama itself on loopback only
+(its default; never set `OLLAMA_HOST=0.0.0.0`).
+
+### Measured on the demo machine (2026-10-25)
+
+Intel i5-1235U, 15.7 GB RAM (1-2 GB free while browsers run), Iris Xe - CPU-only
+inference. `services/hint-engine/scripts/benchmark.ts` runs six fixed scenarios
+through the real prompt builder, provider and validator:
+
+| Model (Ollama tag)                 | Quant  | Resident | Cold start | p50 / p95    | Valid | Grounded | Solution leaks                     |
+| ---------------------------------- | ------ | -------- | ---------- | ------------ | ----- | -------- | ---------------------------------- |
+| `qwen2.5:1.5b-instruct` (selected) | Q4_K_M | 1.04 GiB | 4.7-8.7 s  | 6.4 / 8.8 s  | 6/6   | 4/6      | 0                                  |
+| `qwen2.5-coder:1.5b-instruct`      | Q4_K_M | 1.04 GiB | 8.0 s      | 7.5 / 15.5 s | 4/6   | 1/4      | 2 (both rejected by the validator) |
+
+Through the full stack (API -> hint-engine -> Ollama) one AI-mentor hint took
+11.8 s. Quality is adequate for short guidance but limited: the model sometimes
+refers to "the student" and can misstate the cause of a failure. Larger models
+(3B+) did not fit the free memory on this machine. Re-run the benchmark after
+changing models: `pnpm --filter @gradevision/hint-engine exec tsx scripts/benchmark.ts <tag>`
+(with `NODE_ENV=test`, or with `INTERNAL_SERVICE_TOKEN` set).
+
+### Output validation (`validate.ts`)
+
+Every generated reply passes `validateHintOutput` before it is returned. A
+reply is rejected - `502 INVALID_OUTPUT` from the hint-engine, `503
+HINT_PROVIDER_UNAVAILABLE` from the API, **nothing recorded** - when it is
+empty, longer than 160 words / 1,200 characters, contains a fenced code block,
+more than two code-like lines or a long inline code span, echoes the prompt or
+its fences, or claims to know what a hidden test contains. `<think>` blocks and
+"Hint:" labels are stripped first. The validator version (`hint-output-v1`) is
+stored with each delivered hint.
+
+### Snapshots and provenance
+
+Every delivered hint stores the exact text shown in `HintUsage.detail.hint`:
+
+- static: `{ hint, source: "static" }` - editing a stage later never rewrites
+  history (rows delivered before this existed were back-filled from the
+  then-current text by migration `20261025180000_snapshot_static_hint_text`
+  and carry `backfilled: true`);
+- AI: `{ hint, source: "ai", provider, model, validator, evidence: {counts} }`.
+
+Provider and model are shown to the instructor in Evidence Replay; the student
+response never includes them.
+
+`GeminiProvider` (cloud, opt-in) is the original implementation — plain `fetch` to the Gemini REST
 `generateContent` endpoint, zero SDK. **Everything is env-driven**, nothing is
 hard-coded:
 
@@ -76,10 +154,11 @@ hard-coded:
 | `GEMINI_API_KEY`  | _(none — provider reports unconfigured)_           |
 | `GEMINI_MODEL`    | `gemini-2.0-flash`                                 |
 | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta` |
-| `LLM_PROVIDER`    | `gemini`                                           |
 
-Swapping in another LLM (or Ollama) means adding one file that implements
-`LLMProvider` — the HTTP contract (`POST /hints`) does not change.
+It is used only when `LLM_PROVIDER=gemini` is set explicitly. Adding another
+provider means one file implementing `LLMProvider` - both providers share the
+same system prompt, prompt builder and output validator, and the HTTP contract
+(`POST /hints`) does not change.
 
 ### Prompt
 
@@ -117,7 +196,9 @@ guidance specific to what actually happened. The delivered AI hint's
 
 | Situation                        | Result                                                                               |
 | -------------------------------- | ------------------------------------------------------------------------------------ |
-| No `GEMINI_API_KEY`              | hint-engine `503 PROVIDER_NOT_CONFIGURED`; API → `503 HINT_PROVIDER_UNAVAILABLE`     |
+| Provider unconfigured            | hint-engine `503 PROVIDER_NOT_CONFIGURED`; API → `503 HINT_PROVIDER_UNAVAILABLE`     |
+| Ollama stopped / model missing   | hint-engine `502 PROVIDER_ERROR`; API → `503 HINT_PROVIDER_UNAVAILABLE`              |
+| Reply fails validation           | hint-engine `502 INVALID_OUTPUT`; API → `503 HINT_PROVIDER_UNAVAILABLE`              |
 | Provider error / timeout / block | hint-engine `502 PROVIDER_ERROR` (no details); API → `503 HINT_PROVIDER_UNAVAILABLE` |
 | Static stages                    | always work, regardless of provider state                                            |
 
@@ -127,5 +208,8 @@ client, and never persists a fabricated hint as `CONSUMED`.
 ## Security
 
 - All hint state is scoped to `req.auth.userId` via the exam session.
-- Optional `INTERNAL_SERVICE_TOKEN`: when set, the API sends it as a bearer and
-  the hint-engine requires it on `POST /hints`.
+- `INTERNAL_SERVICE_TOKEN` is required: the API sends it as a bearer and the
+  hint-engine rejects `POST /hints` without it (401). Bodies over 256 KB get 413.
+- An AI failure never changes a grade or assessment state: grading is done by
+  the evaluator from execution results only, and a failed hint request writes
+  no usage row.

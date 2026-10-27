@@ -1,18 +1,20 @@
 import { Router } from "express";
 
 import { validateBody } from "../../middleware/index.js";
-import { getMe, postLogin } from "./auth.controller.js";
+import { getMe, getSession, postLogin, postLogout } from "./auth.controller.js";
 import { requireAuth } from "./auth.middleware.js";
 import { loginSchema } from "./auth.schema.js";
 
 /**
- * Auth module: routes only wire middleware to controllers.
- *   POST /api/v1/auth/login   validate -> controller -> service
- *   GET  /api/v1/auth/me      authenticate -> controller -> service
- *
- * Deferred: register, logout, refresh, password reset, SSO.
+ * Auth routes, mounted at `/api/v1/auth`:
+ *   POST /login    validate -> controller -> service (opens a server-side session)
+ *   GET  /me       authenticate -> current account
+ *   GET  /session  authenticate -> current account + CSRF token
+ *   POST /logout   authenticate (+CSRF for cookies) -> revoke session, clear cookie
  */
 export const authRouter: Router = Router();
 
 authRouter.post("/login", validateBody(loginSchema), postLogin);
 authRouter.get("/me", ...requireAuth(), getMe);
+authRouter.get("/session", ...requireAuth(), getSession);
+authRouter.post("/logout", ...requireAuth(), postLogout);

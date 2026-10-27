@@ -1,7 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { HomeRedirect } from "./components/HomeRedirect";
-import { RequireInstructor, RequireStudent } from "./components/RequireRole";
+import { RequireAdmin, RequireInstructor, RequireStudent } from "./components/RequireRole";
+import { AdminPage } from "./pages/AdminPage";
 import { AssessmentEditorPage } from "./pages/AssessmentEditorPage";
 import { AssessmentResultsPage } from "./pages/AssessmentResultsPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -39,6 +40,10 @@ export function App() {
           path="/student/exam/:sessionId/transfer/:questionId"
           element={<TransferCheckPage />}
         />
+      </Route>
+
+      <Route element={<RequireAdmin />}>
+        <Route path="/admin" element={<AdminPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

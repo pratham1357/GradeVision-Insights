@@ -4,6 +4,7 @@ import type {
   AssessmentSummary,
   InstructorAssessmentResults,
   InstructorCourse,
+  InstructorHintStage,
   InstructorSessionResult,
   InstructorStudentMonitor,
   ProgrammingLanguage,
@@ -146,4 +147,27 @@ export const instructorApi = {
       method: "PUT",
       ...json({ criteria }),
     }),
+
+  listHintStages: (questionId: string) =>
+    apiRequest<InstructorHintStage[]>(`/questions/${questionId}/hint-stages`),
+  createHintStage: (questionId: string, body: HintStageInput) =>
+    apiRequest<InstructorHintStage[]>(`/questions/${questionId}/hint-stages`, {
+      method: "POST",
+      ...json(body),
+    }),
+  updateHintStage: (questionId: string, stageId: string, body: Partial<HintStageInput>) =>
+    apiRequest<InstructorHintStage[]>(`/questions/${questionId}/hint-stages/${stageId}`, {
+      method: "PATCH",
+      ...json(body),
+    }),
+  deleteHintStage: (questionId: string, stageId: string) =>
+    apiRequest<InstructorHintStage[]>(`/questions/${questionId}/hint-stages/${stageId}`, {
+      method: "DELETE",
+    }),
 };
+
+export interface HintStageInput {
+  title: string | null;
+  deliveryType: "STATIC" | "INTERACTIVE";
+  content: string | null;
+}

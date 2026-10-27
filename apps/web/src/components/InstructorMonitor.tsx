@@ -191,7 +191,7 @@ export function StudentMonitorCard() {
 
 // --- System metrics ----------------------------------------------------------
 
-/** API-process runtime metrics, from `GET /monitoring/system`. Instructor-only. */
+/** API-process runtime metrics, from `GET /monitoring/system` (INSTRUCTOR or ADMIN). */
 export function SystemMetricsCard() {
   const { data, loading, error, reload } = useApi(() => instructorApi.getSystemMetrics(), []);
 

@@ -2,22 +2,29 @@ import { Router } from "express";
 
 import { requireRole, validateBody, validateParams } from "../../middleware/index.js";
 import {
+  createHintStage,
   createQuestion,
   createTestCase,
+  deleteHintStage,
   deleteTestCase,
+  getHintStages,
   getQuestion,
   getRubric,
   listQuestions,
+  patchHintStage,
   patchTestCase,
   putRubric,
   updateQuestion,
 } from "./questions.controller.js";
 import {
+  createHintStageSchema,
   createQuestionSchema,
   createTestCaseSchema,
+  hintStageParamsSchema,
   questionParamsSchema,
   saveRubricSchema,
   testCaseParamsSchema,
+  updateHintStageSchema,
   updateQuestionSchema,
   updateTestCaseSchema,
 } from "./questions.schema.js";
@@ -69,4 +76,28 @@ questionsRouter.put(
   validateParams(questionParamsSchema),
   validateBody(saveRubricSchema),
   putRubric,
+);
+
+// Hint stages: authored progressive hints (static text or the local AI mentor).
+questionsRouter.get(
+  "/:questionId/hint-stages",
+  validateParams(questionParamsSchema),
+  getHintStages,
+);
+questionsRouter.post(
+  "/:questionId/hint-stages",
+  validateParams(questionParamsSchema),
+  validateBody(createHintStageSchema),
+  createHintStage,
+);
+questionsRouter.patch(
+  "/:questionId/hint-stages/:stageId",
+  validateParams(hintStageParamsSchema),
+  validateBody(updateHintStageSchema),
+  patchHintStage,
+);
+questionsRouter.delete(
+  "/:questionId/hint-stages/:stageId",
+  validateParams(hintStageParamsSchema),
+  deleteHintStage,
 );

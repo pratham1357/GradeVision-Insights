@@ -1,6 +1,7 @@
 import type {
   ConceptDto,
   ExternalProblemReference,
+  InstructorHintStage,
   QuestionDetail,
   QuestionLanguageDto,
   QuestionSummary,
@@ -11,24 +12,32 @@ import type {
 import { ApiError } from "../../utils/api-error.js";
 import { findExistingConceptIds } from "../concepts/concepts.repository.js";
 import {
+  appendHintStage,
   createQuestion,
   createTestCase,
+  deleteHintStage,
   deleteTestCase,
+  findHintStageForQuestion,
   findInstructorQuestion,
   findOwnedQuestionMeta,
   findRubricWithCriteria,
   findTestCase,
+  listHintStages,
   listInstructorQuestions,
   nextTestCasePosition,
   syncRubricCriteria,
+  updateHintStage,
   updateQuestion,
   updateTestCase,
 } from "./questions.repository.js";
-import type {
-  CreateQuestionInput,
-  CreateTestCaseInput,
-  SaveRubricInput,
-  UpdateTestCaseInput,
+import {
+  MAX_HINT_STAGES,
+  type CreateHintStageInput,
+  type CreateQuestionInput,
+  type CreateTestCaseInput,
+  type SaveRubricInput,
+  type UpdateHintStageInput,
+  type UpdateTestCaseInput,
 } from "./questions.schema.js";
 
 type SummaryRow = Awaited<ReturnType<typeof listInstructorQuestions>>[number];
@@ -322,4 +331,108 @@ export async function saveInstructorRubric(
     })),
   );
   return toRubric(rubric);
+}
+
+// --- Hint stages (authoring) ------------------------------------------------
+//
+// Stages stay numbered 1..n without gaps: new stages are appended and only the
+// last, never-delivered stage can be removed. That keeps the student policy
+// ("stage N needs stage N-1 used") satisfiable for every stage. Editing a stage
+// that was already delivered is allowed - every delivery stores a snapshot of
+// the text shown, so the evidence record is unaffected.
+
+type HintStageRow = Awaited<ReturnType<typeof listHintStages>>[number];
+
+function toHintStage(row: HintStageRow): InstructorHintStage {
+  return {
+    id: row.id,
+    stageNumber: row.stageNumber,
+    title: row.title,
+    deliveryType: row.deliveryType,
+    content: row.content,
+    usageCount: row._count.usages,
+  };
+}
+
+export async function getInstructorHintStages(
+  questionId: string,
+  instructorId: string,
+): Promise<InstructorHintStage[]> {
+  await assertQuestionOwner(questionId, instructorId);
+  return (await listHintStages(questionId)).map(toHintStage);
+}
+
+export async function addHintStage(
+  questionId: string,
+  input: CreateHintStageInput,
+  instructorId: string,
+): Promise<InstructorHintStage[]> {
+  await assertQuestionOwner(questionId, instructorId);
+  if ((await listHintStages(questionId)).length >= MAX_HINT_STAGES) {
+    throw new ApiError(
+      409,
+      "HINT_STAGE_LIMIT",
+      `A question can have at most ${MAX_HINT_STAGES} hint stages`,
+    );
+  }
+  await appendHintStage(questionId, {
+    title: input.title ?? null,
+    deliveryType: input.deliveryType,
+    content: input.deliveryType === "STATIC" ? (input.content ?? null) : null,
+  });
+  return getInstructorHintStages(questionId, instructorId);
+}
+
+export async function editHintStage(
+  questionId: string,
+  stageId: string,
+  input: UpdateHintStageInput,
+  instructorId: string,
+): Promise<InstructorHintStage[]> {
+  await assertQuestionOwner(questionId, instructorId);
+  const stage = await findHintStageForQuestion(stageId, questionId);
+  if (!stage) {
+    throw ApiError.notFound("Hint stage not found");
+  }
+  const deliveryType = input.deliveryType ?? stage.deliveryType;
+  const content =
+    deliveryType === "INTERACTIVE"
+      ? null
+      : input.content !== undefined
+        ? (input.content ?? null)
+        : stage.content;
+  if (deliveryType === "STATIC" && !content?.trim()) {
+    throw ApiError.badRequest("A written hint needs its text");
+  }
+  await updateHintStage(stageId, {
+    ...(input.title !== undefined ? { title: input.title ?? null } : {}),
+    deliveryType,
+    content,
+  });
+  return getInstructorHintStages(questionId, instructorId);
+}
+
+export async function removeHintStage(
+  questionId: string,
+  stageId: string,
+  instructorId: string,
+): Promise<InstructorHintStage[]> {
+  await assertQuestionOwner(questionId, instructorId);
+  const stages = await listHintStages(questionId);
+  const stage = stages.find((s) => s.id === stageId);
+  if (!stage) {
+    throw ApiError.notFound("Hint stage not found");
+  }
+  if (stage.id !== stages.at(-1)?.id) {
+    throw new ApiError(409, "HINT_STAGE_NOT_LAST", "Only the last hint stage can be removed");
+  }
+  if (stage._count.usages > 0) {
+    throw new ApiError(
+      409,
+      "HINT_STAGE_IN_USE",
+      "This hint has already been delivered to a student and is part of their evidence record",
+    );
+  }
+  await deleteHintStage(stageId);
+  return getInstructorHintStages(questionId, instructorId);
 }
